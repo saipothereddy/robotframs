@@ -1,6 +1,26 @@
+*** Variables ***
+${OKTA_USER}        your.email@company.com
+${OKTA_PASSWORD}    your_password
+
+*** Test Cases ***
 Login Through Okta SSO
     Click Element    xpath=//a[contains(., 'Single Sign-On')] | //button[contains(., 'Single Sign-On')]
-    Wait Until Page Contains Element    xpath=(//input[@type='text' or @type='email'])[1]
-    Input Text    xpath=(//input[@type='text' or @type='email'])[1]    ${OKTA_USER}
+
+
+    Wait Until Page Contains Element    xpath=(//input[@type='email' or @type='text'])[1]
+
+
+    Input Text    xpath=(//input[@type='email' or @type='text'])[1]    ${OKTA_USER}
+
+    Click Button    xpath=//input[@type='submit' or contains(@value, 'Next') or contains(@value, 'Continue')] | //button[contains(., 'Next') or contains(., 'Continue')]
+
+    Wait Until Page Contains Element    xpath=//input[@type='password']
+
     Input Text    xpath=//input[@type='password']    ${OKTA_PASSWORD}
-    Click Button  xpath=//input[@type='submit' or @type='button']
+
+
+    Click Button    xpath=//input[@type='submit' or contains(@value, 'Verify') or contains(@value, 'Sign In')] | //button[contains(., 'Verify') or contains(., 'Sign In')]
+
+
+    Wait Until Page Contains    Dashboard
+
