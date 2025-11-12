@@ -1,0 +1,6 @@
+Login Through Okta SSO
+    Click Element    xpath=//a[contains(., 'Single Sign-On')] | //button[contains(., 'Single Sign-On')]
+    Wait Until Page Contains Element    xpath=(//input[@type='text' or @type='email'])[1]
+    Input Text    xpath=(//input[@type='text' or @type='email'])[1]    ${OKTA_USER}
+    Input Text    xpath=//input[@type='password']    ${OKTA_PASSWORD}
+    Click Button  xpath=//input[@type='submit' or @type='button']
