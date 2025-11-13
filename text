@@ -1,26 +1,9 @@
-*** Variables ***
-${OKTA_USER}        your.email@company.com
-${OKTA_PASSWORD}    your_password
+# Wait for password field
+Wait Until Element Is Visible    xpath=//input[@name='credentials.passcode' or @id='input66']    timeout=20s
 
-*** Test Cases ***
-Login Through Okta SSO
-    Click Element    xpath=//a[contains(., 'Single Sign-On')] | //button[contains(., 'Single Sign-On')]
+# Activate field
+Click Element                    xpath=//input[@name='credentials.passcode' or @id='input66']
+Sleep    1s
 
-
-    Wait Until Page Contains Element    xpath=(//input[@type='email' or @type='text'])[1]
-
-
-    Input Text    xpath=(//input[@type='email' or @type='text'])[1]    ${OKTA_USER}
-
-    Click Button    xpath=//input[@type='submit' or contains(@value, 'Next') or contains(@value, 'Continue')] | //button[contains(., 'Next') or contains(., 'Continue')]
-
-    Wait Until Page Contains Element    xpath=//input[@type='password']
-
-    Input Text    xpath=//input[@type='password']    ${OKTA_PASSWORD}
-
-
-    Click Button    xpath=//input[@type='submit' or contains(@value, 'Verify') or contains(@value, 'Sign In')] | //button[contains(., 'Verify') or contains(., 'Sign In')]
-
-
-    Wait Until Page Contains    Dashboard
-
+# Enter password
+Input Text                       xpath=//input[@name='credentials.passcode' or @id='input66']    ${OKTA_PASS}
