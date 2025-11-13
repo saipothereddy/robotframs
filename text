@@ -1,9 +1,3 @@
-# Wait for password field
-Wait Until Element Is Visible    xpath=//input[@name='credentials.passcode' or @id='input66']    timeout=20s
+Execute Javascript    document.querySelector("input[placeholder='Search your projects']").dispatchEvent(new KeyboardEvent('keydown',{key:'Enter'}));
 
-# Activate field
-Click Element                    xpath=//input[@name='credentials.passcode' or @id='input66']
-Sleep    1s
 
-# Enter password
-Input Text                       xpath=//input[@name='credentials.passcode' or @id='input66']    ${OKTA_PASS}
