@@ -1,5 +1,2 @@
-    Wait Until Element Is Visible    xpath=//div[contains(@class,'gl-search-box-results')]    timeout=10s
-
-    # CLICK the lower "slug" line → the true project link
-    Click Element    xpath=//div[contains(@class,'gl-search-box-results')]//a[.//span[contains(., '${PROJECT_NAME}')]]
+Click Element    xpath=//a[.//span[@data-testid="autocomplete-item-name" and contains(normalize-space(.), '${PROJECT_NAME}')]]
 
