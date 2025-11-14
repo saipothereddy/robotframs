@@ -1,12 +1,13 @@
-*** Keywords ***
-Open Chrome
-    ${options}=    Evaluate    sys.modules['selenium.webdriver'].EdgeOptions()    sys, selenium.webdriver
-    Call Method    ${options}    add_argument    --start-maximized
+Click Element    xpath=//input[@placeholder='Search your projects' or @placeholder='Filter or search (3 character minimum)']
+Input Text       xpath=//input[@placeholder='Search your projects' or @placeholder='Filter or search (3 character minimum)']    ${PROJECT_NAME}
 
-    ${service}=    Evaluate    sys.modules['selenium.webdriver.edge.service'].Service(r"${EDGE DRIVER}")    sys, selenium.webdriver.edge.service
+sleep    5s
+Press Keys    xpath=//input[@placeholder='Search your projects' or @placeholder='Filter or search (3 character minimum)']    ENTER    ENTER
 
-    Create WebDriver    Edge    service=${service}    options=${options}
+# Wait for the dropdown result to appear
+Wait Until Element Is Visible    xpath=//div[contains(@class,'gl-search-box-results')]//span[contains(., '${PROJECT_NAME}')]    timeout=10s
 
-${EDGE DRIVER}    C:/Drivers/msedgedriver.exe
+# Click the search suggestion
+Click Element    xpath=//div[contains(@class,'gl-search-box-results')]//span[contains(., '${PROJECT_NAME}')]
 
-https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/ 
+Wait Until Page Contains    ${PROJECT_NAME}
