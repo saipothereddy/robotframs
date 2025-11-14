@@ -1,13 +1,7 @@
-Click Element    xpath=//input[@placeholder='Search your projects' or @placeholder='Filter or search (3 character minimum)']
-Input Text       xpath=//input[@placeholder='Search your projects' or @placeholder='Filter or search (3 character minimum)']    ${PROJECT_NAME}
+    Click Element    xpath=(
+        //div[contains(@class,'gl-search-box-results')]//a[.//span[contains(.,'${PROJECT_NAME}')]]
+        |
+        //li//a[.//span[contains(., '${PROJECT_NAME}')]]
+    )
 
-sleep    5s
-Press Keys    xpath=//input[@placeholder='Search your projects' or @placeholder='Filter or search (3 character minimum)']    ENTER    ENTER
-
-# Wait for the dropdown result to appear
-Wait Until Element Is Visible    xpath=//div[contains(@class,'gl-search-box-results')]//span[contains(., '${PROJECT_NAME}')]    timeout=10s
-
-# Click the search suggestion
-Click Element    xpath=//div[contains(@class,'gl-search-box-results')]//span[contains(., '${PROJECT_NAME}')]
-
-Wait Until Page Contains    ${PROJECT_NAME}
+    Sleep    3s
