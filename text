@@ -1,3 +1,12 @@
-Click Element    xpath=//button[contains(@aria-label, 'Search') or contains(., 'Search') or .//svg]
+*** Keywords ***
+Open Chrome
+    ${options}=    Evaluate    sys.modules['selenium.webdriver'].EdgeOptions()    sys, selenium.webdriver
+    Call Method    ${options}    add_argument    --start-maximized
 
+    ${service}=    Evaluate    sys.modules['selenium.webdriver.edge.service'].Service(r"${EDGE DRIVER}")    sys, selenium.webdriver.edge.service
 
+    Create WebDriver    Edge    service=${service}    options=${options}
+
+${EDGE DRIVER}    C:/Drivers/msedgedriver.exe
+
+https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/ 
