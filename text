@@ -1,2 +1,17 @@
-Click Element    xpath=//a[.//span[@data-testid="autocomplete-item-name" and contains(normalize-space(.), '${PROJECT_NAME}')]]
+*** Keywords ***
+Acquire Token With Error Handling
+    Log To Console    \n--- Acquiring Token ---
+    ${result}=    Run Keyword And Ignore Error    Get Token
+    ${status}=    Set Variable    ${result[0]}
+    ${token}=     Set Variable If    '${status}'=='PASS'    ${result[1]}    NONE
+    Set Suite Variable    ${TOKEN}    ${token}
+    Run Keyword If    '${status}'=='FAIL'    Log Warning    Token fetch failed, continuing without token.
+    Log To Console    TOKEN = ${TOKEN}
+
+Get Token
+    Create Session    auth    https://api.example.com
+    ${resp}=    Post Request    auth    /auth    data={"user": "admin", "pass": "password"}
+    Should Be Equal As Integers    ${resp.status_code}    200
+    ${json}=    To Json    ${resp.content}
+    [Return]    ${json["token"]}
 
