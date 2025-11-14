@@ -1,7 +1,5 @@
-    Click Element    xpath=(
-        //div[contains(@class,'gl-search-box-results')]//a[.//span[contains(.,'${PROJECT_NAME}')]]
-        |
-        //li//a[.//span[contains(., '${PROJECT_NAME}')]]
-    )
+    Wait Until Element Is Visible    xpath=//div[contains(@class,'gl-search-box-results')]    timeout=10s
 
-    Sleep    3s
+    # CLICK the lower "slug" line → the true project link
+    Click Element    xpath=//div[contains(@class,'gl-search-box-results')]//a[.//span[contains(., '${PROJECT_NAME}')]]
+
