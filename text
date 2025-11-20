@@ -1,20 +1,19 @@
 *** Keywords ***
 Acquire Token With Error Handling
     Log To Console    \n--- Acquiring Token ---
-    ${result}=    Run Keyword And Ignore Error    Get Token
-    ${status}=    Set Variable    ${result[0]}
-    ${token}=    Set Variable If    '${status}'=='PASS'    ${result[1]}    NONE
+    ${status}    ${token}=    Run Keyword And Ignore Error    Get Token
+    ${token}=    Set Variable If    '${status}'=='PASS'    ${token}    NONE
     Set Suite Variable    ${TOKEN}    ${token}
-    Run Keyword If    '${status}'=='FAIL'    Log Warning    Token fetch failed, continuing without token.
+    Run Keyword If    '${status}'=='FAIL'    Log    Token fetch failed, continuing without token.
     Log To Console    TOKEN = ${TOKEN}
 
 Get Token
-    # This is just an example. Replace with your API call.
-    Create Session    auth    https://api.example.com
-    ${resp}=    Get Request    auth    /token
+    Create Session    auth    https://api.example.com    verify=False
+    ${resp}=    GET On Session    auth    /token
     Should Be Equal As Integers    ${resp.status_code}    200
-    ${json}=    To Json    ${resp.content}
-    [Return]    ${json["token"]}
+    ${json}=    Evaluate    resp.json()    resp=${resp}
+    RETURN    ${json["token"]}
+
 
 
 
