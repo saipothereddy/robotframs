@@ -3,15 +3,41 @@ Acquire Token With Error Handling
     Log To Console    \n--- Acquiring Token ---
     ${result}=    Run Keyword And Ignore Error    Get Token
     ${status}=    Set Variable    ${result[0]}
-    ${token}=     Set Variable If    '${status}'=='PASS'    ${result[1]}    NONE
+    ${token}=    Set Variable If    '${status}'=='PASS'    ${result[1]}    NONE
     Set Suite Variable    ${TOKEN}    ${token}
     Run Keyword If    '${status}'=='FAIL'    Log Warning    Token fetch failed, continuing without token.
     Log To Console    TOKEN = ${TOKEN}
 
 Get Token
+    # This is just an example. Replace with your API call.
     Create Session    auth    https://api.example.com
-    ${resp}=    Post Request    auth    /auth    data={"user": "admin", "pass": "password"}
+    ${resp}=    Get Request    auth    /token
     Should Be Equal As Integers    ${resp.status_code}    200
     ${json}=    To Json    ${resp.content}
     [Return]    ${json["token"]}
+
+
+
+
+
+*** Settings ***
+Library    RequestsLibrary
+Library    BuiltIn
+Suite Setup    Acquire Token With Error Handling
+Resource    token_keywords.robot
+
+*** Test Cases ***
+
+Test Case A - Validate Token
+    [Documentation]    Test A should run first, but even if it fails, B must run.
+    Log To Console    \nRunning Test A...
+    Should Not Be Equal    ${TOKEN}    NONE
+    Log To Console    Token in Test A: ${TOKEN}
+
+Test Case B - Must Run Always
+    [Documentation]    Test B runs even if A fails or token acquisition fails.
+    Log To Console    \nRunning Test B...
+    Log To Console    Token in Test B: ${TOKEN}
+    # Simulated test action
+    Log To Console    Test B executed successfully.
 
