@@ -40,3 +40,59 @@ Test Case B - Must Run Always
     # Simulated test action
     Log To Console    Test B executed successfully.
 
+
+
+
+*** Settings ***
+Suite Setup    Acquire Token With Error Handling
+Resource       token_keywords.robot
+Library        BuiltIn
+
+*** Variables ***
+${A_STATUS}    NONE
+${B_STATUS}    NONE
+
+*** Test Cases ***
+
+Test Case A - Can Fail
+    [Documentation]    Test Case A runs first. If it fails, Test Case B must still run.
+    Log To Console    Running Test Case A...
+    # This assertion may fail depending on token availability
+    ${result}=    Run Keyword And Ignore Error    Should Not Be Equal    ${TOKEN}    NONE
+    ${A_STATUS}=    Set Variable    ${result[0]}
+    Set Suite Variable    ${A_STATUS}    ${A_STATUS}
+    Log To Console    Finished Test Case A with status: ${A_STATUS}
+
+Test Case B - Always Runs
+    [Documentation]    Test Case B must run even if Test Case A fails.
+    Log To Console    Running Test Case B...
+    Log To Console    Token used in Test Case B: ${TOKEN}
+    Log To Console    Test Case B executed regardless of Test Case A result.
+    Set Suite Variable    ${B_STATUS}    PASSED
+
+Test Case C - Validate Rule A Failed → B Executed
+    [Documentation]    Validates: Test A failed, Test B should have executed.
+    Log To Console    Running Test Case C...
+    Log To Console    A Status = ${A_STATUS}
+    Log To Console    B Status = ${B_STATUS}
+
+    # If A failed, B must be PASSED
+    Run Keyword If    '${A_STATUS}'=='FAIL' and '${B_STATUS}'=='PASSED'    
+    ...    Log To Console     Validation Passed: A failed and B executed.
+
+    # If A failed but B did NOT run → FAIL test
+    Run Keyword If    '${A_STATUS}'=='FAIL' and '${B_STATUS}'!='PASSED'
+    ...    Fail     Validation Failed: A failed but B did NOT execute!
+
+    # If A passed, B behavior is normal
+    Run Keyword If    '${A_STATUS}'=='PASS'
+    ...    Log To Console     A Passed → B executed as expected.
+
+
+
+
+
+
+
+
+
