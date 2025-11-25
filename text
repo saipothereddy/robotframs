@@ -130,40 +130,98 @@ Run Curl And Verify Logs On Linux
 
 
 
+*** Settings ***
+Library    SeleniumLibrary
+Library    OperatingSystem
+Library    Collections
+
+*** Keywords ***
+
+Open Chrome
+    ${options}=    Evaluate    sys.modules['selenium.webdriver'].EdgeOptions()    sys, selenium.webdriver
+    Call Method    ${options}    add_argument    --start-maximized
+
+    ${service}=    Evaluate    sys.modules['selenium.webdriver.edge.service'].Service(r"${EDGE DRIVER}")    sys, selenium.webdriver.edge.service
+
+    Create WebDriver    Edge    service=${service}    options=${options}
+    Set Selenium Timeout    30s
+    Set Selenium Speed      0.3s
+
+
+Open GitLab Login Page
+    Go To    ${GITLAB_URL}/users/sign_in
+
+
+Login Through Okta SSO
+    Sleep    5s
+
+    # Click SSO login button
+    Click Element    xpath=//a[contains(., 'Single Sign-On')] | //button[contains(., 'Single Sign-On')]
+
+    # Okta login
+    Wait Until Page Contains Element    id=okta-signin-username
+    Input Text    id=okta-signin-username    ${OKTA_USER}
+    Input Text    id=okta-signin-password    ${OKTA_PASS}
+    Click Button    id=okta-signin-submit
+
+    Run Keyword And Ignore Error    Handle MFA
+
+    # Launch app dynamically (GitLab, AWS, Jira, etc.)
+    Launch Okta App
+
+
+Launch Okta App
+    Log To Console    --- Launching Okta App: ${APP_URL} ---
+
+    # Wait for Okta dashboard
+    Wait Until Page Contains Element    xpath=//div[@data-se='app-card']
+
+    # Dynamic tile locator using ${APP_URL}
+    ${APP_TILE}=    Set Variable
+    ...    xpath=//div[
+    ...        @data-se='app-card'
+    ...    ]//div[
+    ...        contains(@class,'app-label')
+    ...        and contains(normalize-space(.), '${APP_URL}')
+    ...    ]
+
+    Log To Console    App Tile Locator: ${APP_TILE}
+
+    # Before clicking tile, capture current tabs
+    ${before}=    Get Window Handles
+
+    # Click Okta App Tile (e.g., GitLab)
+    Click Element    ${APP_TILE}
+    Sleep    2s
+
+    # Wait for new app tab to open
+    Wait Until Keyword Succeeds    10x    1s    Wait For New Tab    ${before}
+
+    # Switch to newest tab
+    Switch To Latest Tab
+
+    Log To Console    --- ${APP_URL} App opened in new tab successfully ---
+
+
+Handle MFA
+    Sleep    3s
+
+
 Wait For New Tab
-    ${handles}=    Get Window Handles
-    Should Be True    ${len(${handles})} > 1    No new tab opened yet.
+    [Arguments]    ${before}
+    ${after}=    Get Window Handles
+    Should Be True    ${len(${after})} > ${len(${before})}    New tab not opened yet.
+
 
 Switch To Latest Tab
-    ${handles}=    Get Window Handles
-    ${last}=    Set Variable    ${handles}[-1]
+    ${tabs}=    Get Window Handles
+    ${last}=    Set Variable    ${tabs}[-1]
     Switch Window    handle=${last}
 
 
+Capture Screenshot
+    Capture Page Screenshot    results/screenshot_${TEST NAME}.png
 
-
-Search GitLab And Switch Tab
-    [Arguments]    ${TEXT}
-
-    Log To Console    === Starting Search ===
-
-    Click Element    xpath=//input[contains(@placeholder, 'Search')]
-
-    Input Text       xpath=//input[contains(@placeholder, 'Search')]    ${TEXT}
-
-
-    ${before}=    Get Window Handles
-
-    Press Keys      xpath=//input[contains(@placeholder, 'Search')]    ENTER
-
-    Sleep    2s
-
-    Wait Until Keyword Succeeds    10x    1s    Wait For New Tab    ${before}
-
-
-    Switch To Latest Tab
-
-    Log To Console    === Search Tab Switched Successfully ===
 
 
 
