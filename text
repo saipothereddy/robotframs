@@ -130,10 +130,14 @@ Run Curl And Verify Logs On Linux
 
 
 
-
-Wait Until Keyword Succeeds    10x    1s    Wait For New Tab
+Wait For New Tab
+    ${handles}=    Get Window Handles
+    Should Be True    ${len(${handles})} > 1    No new tab opened yet.
 
 Switch To Latest Tab
+    ${handles}=    Get Window Handles
+    ${last}=    Set Variable    ${handles}[-1]
+    Switch Window    handle=${last}
 
 
 
