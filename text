@@ -173,17 +173,19 @@ Login Through Okta SSO
 Launch Okta App
     Log To Console    --- Launching Okta App: ${APP_URL} ---
 
-    # Wait for Okta dashboard
-    Wait Until Page Contains Element    xpath=//div[@data-se='app-card']
-
-    # Dynamic tile locator using ${APP_URL}
+    Wait Until Page Contains Element    
+    ...    xpath=(//div[@data-se='app-card'] | //button[contains(@class,'app-button')])    
+    ...    timeout=20s
+    
     ${APP_TILE}=    Set Variable
-    ...    xpath=//div[
-    ...        @data-se='app-card'
-    ...    ]//div[
-    ...        contains(@class,'app-label')
-    ...        and contains(normalize-space(.), '${APP_URL}')
-    ...    ]
+    ...    xpath=(
+    ...        //div[@data-se='app-card']//div[contains(@class,'app-label')
+    ...            and contains(normalize-space(.), '${APP_URL}')]
+    ...        |
+    ...        //button[contains(@class,'app-button')]
+    ...            //span[contains(normalize-space(.), '${APP_URL}')]
+    ...    )
+
 
     Log To Console    App Tile Locator: ${APP_TILE}
 
