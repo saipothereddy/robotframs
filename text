@@ -131,6 +131,13 @@ Run Curl And Verify Logs On Linux
 
 
 
+Wait Until Keyword Succeeds    10x    1s    Wait For New Tab
+
+Switch To Latest Tab
+
+
+
+
 
 
 
