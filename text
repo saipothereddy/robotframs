@@ -142,6 +142,31 @@ Switch To Latest Tab
 
 
 
+Search GitLab And Switch Tab
+    [Arguments]    ${TEXT}
+
+    Log To Console    === Starting Search ===
+
+    Click Element    xpath=//input[contains(@placeholder, 'Search')]
+
+    Input Text       xpath=//input[contains(@placeholder, 'Search')]    ${TEXT}
+
+
+    ${before}=    Get Window Handles
+
+    Press Keys      xpath=//input[contains(@placeholder, 'Search')]    ENTER
+
+    Sleep    2s
+
+    Wait Until Keyword Succeeds    10x    1s    Wait For New Tab    ${before}
+
+
+    Switch To Latest Tab
+
+    Log To Console    === Search Tab Switched Successfully ===
+
+
+
 
 
 
