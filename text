@@ -173,15 +173,15 @@ Login Through Okta SSO
 Launch Okta App
     Log To Console    --- Launching Okta App: ${APP_URL} ---
 
-    # NEW Okta Dashboard (Material UI)
-    Wait Until Page Contains Element    
-    ...    xpath=//input[@id='dashboard-search-input']    
+    # Wait for Okta App Row Dashboard to load
+    Wait Until Page Contains Element
+    ...    xpath=//span[@data-se='app-row-app-label']
     ...    timeout=30s
-
-    # Dynamic Okta Tile (Material UI)
+    
+    # Correct Dynamic Tile Locator for Classic UI
     ${APP_TILE}=    Set Variable
-    ...    xpath=//button[@data-testid='app-card']//span[
-    ...        @data-testid='app-card-title' 
+    ...    xpath=//span[
+    ...        @data-se='app-row-app-label'
     ...        and contains(normalize-space(.), '${APP_URL}')
     ...    ]
 
