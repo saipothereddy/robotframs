@@ -93,6 +93,46 @@ Test Case C - Validate Rule A Failed → B Executed
 
 
 
+    *** Settings ***
+Library    SSHLibrary
+Library    Process
+
+*** Variables ***
+${HOST}        192.1.1.1
+
+${USER}        ec2-user
+${PASSWORD}    MyPassword123
+${LOG_FILE}    /var/log/messages
+
+*** Test Cases ***
+Run Curl And Verify Logs On Linux
+    [Documentation]    SSH to server → run curl → verify logs.
+    
+    Open Connection    ${HOST}
+    Login              ${USER}    ${PASSWORD}
+
+    # 1) Run CURL command
+    ${curl_output}=    Execute Command    curl -I https://google.com
+    Log To Console     CURL Output:\n${curl_output}
+
+    # 2) Verify CURL command success
+    Should Contain     ${curl_output}     HTTP/2
+
+    # 3) Check Linux log file
+    ${log}=    Execute Command    tail -n 20 ${LOG_FILE}
+    Log To Console     Latest Logs:\n${log}
+
+    # 4) Verify log content
+    Should Contain Any    ${log}    error    failed    warning
+
+    Close Connection
+
+
+
+
+
+
+
 
 
 
