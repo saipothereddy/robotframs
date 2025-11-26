@@ -1,234 +1,97 @@
-*** Keywords ***
-Acquire Token With Error Handling
-    Log To Console    \n--- Acquiring Token ---
-    ${status}    ${token}=    Run Keyword And Ignore Error    Get Token
-    ${token}=    Set Variable If    '${status}'=='PASS'    ${token}    NONE
-    Set Suite Variable    ${TOKEN}    ${token}
-    Run Keyword If    '${status}'=='FAIL'    Log    Token fetch failed, continuing without token.
-    Log To Console    TOKEN = ${TOKEN}
-
-Get Token
-    Create Session    auth    https://api.example.com    verify=False
-    ${resp}=    GET On Session    auth    /token
-    Should Be Equal As Integers    ${resp.status_code}    200
-    ${json}=    Evaluate    resp.json()    resp=${resp}
-    RETURN    ${json["token"]}
-
-
-
-
-
-
-*** Settings ***
-Library    RequestsLibrary
-Library    BuiltIn
-Suite Setup    Acquire Token With Error Handling
-Resource    token_keywords.robot
-
-*** Test Cases ***
-
-Test Case A - Validate Token
-    [Documentation]    Test A should run first, but even if it fails, B must run.
-    Log To Console    \nRunning Test A...
-    Should Not Be Equal    ${TOKEN}    NONE
-    Log To Console    Token in Test A: ${TOKEN}
-
-Test Case B - Must Run Always
-    [Documentation]    Test B runs even if A fails or token acquisition fails.
-    Log To Console    \nRunning Test B...
-    Log To Console    Token in Test B: ${TOKEN}
-    # Simulated test action
-    Log To Console    Test B executed successfully.
-
-
-
-
-*** Settings ***
-Suite Setup    Acquire Token With Error Handling
-Resource       token_keywords.robot
-Library        BuiltIn
-
-*** Variables ***
-${A_STATUS}    NONE
-${B_STATUS}    NONE
-
-*** Test Cases ***
-
-Test Case A - Can Fail
-    [Documentation]    Test Case A runs first. If it fails, Test Case B must still run.
-    Log To Console    Running Test Case A...
-    # This assertion may fail depending on token availability
-    ${result}=    Run Keyword And Ignore Error    Should Not Be Equal    ${TOKEN}    NONE
-    ${A_STATUS}=    Set Variable    ${result[0]}
-    Set Suite Variable    ${A_STATUS}    ${A_STATUS}
-    Log To Console    Finished Test Case A with status: ${A_STATUS}
-
-Test Case B - Always Runs
-    [Documentation]    Test Case B must run even if Test Case A fails.
-    Log To Console    Running Test Case B...
-    Log To Console    Token used in Test Case B: ${TOKEN}
-    Log To Console    Test Case B executed regardless of Test Case A result.
-    Set Suite Variable    ${B_STATUS}    PASSED
-
-Test Case C - Validate Rule A Failed → B Executed
-    [Documentation]    Validates: Test A failed, Test B should have executed.
-    Log To Console    Running Test Case C...
-    Log To Console    A Status = ${A_STATUS}
-    Log To Console    B Status = ${B_STATUS}
-
-    # If A failed, B must be PASSED
-    Run Keyword If    '${A_STATUS}'=='FAIL' and '${B_STATUS}'=='PASSED'    
-    ...    Log To Console     Validation Passed: A failed and B executed.
-
-    # If A failed but B did NOT run → FAIL test
-    Run Keyword If    '${A_STATUS}'=='FAIL' and '${B_STATUS}'!='PASSED'
-    ...    Fail     Validation Failed: A failed but B did NOT execute!
-
-    # If A passed, B behavior is normal
-    Run Keyword If    '${A_STATUS}'=='PASS'
-    ...    Log To Console     A Passed → B executed as expected.
-
-
-
-
-
-
-    *** Settings ***
-Library    SSHLibrary
-Library    Process
-
-*** Variables ***
-${HOST}        192.1.1.1
-
-${USER}        ec2-user
-${PASSWORD}    MyPassword123
-${LOG_FILE}    /var/log/messages
-
-*** Test Cases ***
-Run Curl And Verify Logs On Linux
-    [Documentation]    SSH to server → run curl → verify logs.
-    
-    Open Connection    ${HOST}
-    Login              ${USER}    ${PASSWORD}
-
-    # 1) Run CURL command
-    ${curl_output}=    Execute Command    curl -I https://google.com
-    Log To Console     CURL Output:\n${curl_output}
-
-    # 2) Verify CURL command success
-    Should Contain     ${curl_output}     HTTP/2
-
-    # 3) Check Linux log file
-    ${log}=    Execute Command    tail -n 20 ${LOG_FILE}
-    Log To Console     Latest Logs:\n${log}
-
-    # 4) Verify log content
-    Should Contain Any    ${log}    error    failed    warning
-
-    Close Connection
-
-
-
-
-*** Settings ***
-Library    SeleniumLibrary
-Library    OperatingSystem
-Library    Collections
-
-*** Keywords ***
-
-Open Chrome
-    ${options}=    Evaluate    sys.modules['selenium.webdriver'].EdgeOptions()    sys, selenium.webdriver
-    Call Method    ${options}    add_argument    --start-maximized
-
-    ${service}=    Evaluate    sys.modules['selenium.webdriver.edge.service'].Service(r"${EDGE DRIVER}")    sys, selenium.webdriver.edge.service
-
-    Create WebDriver    Edge    service=${service}    options=${options}
-    Set Selenium Timeout    30s
-    Set Selenium Speed      0.3s
-
-
-Open GitLab Login Page
-    Go To    ${GITLAB_URL}/users/sign_in
-
-
-Login Through Okta SSO
-    Sleep    5s
-
-    # Click SSO login button
-    Click Element    xpath=//a[contains(., 'Single Sign-On')] | //button[contains(., 'Single Sign-On')]
-
-    # Okta login
-    Wait Until Page Contains Element    id=okta-signin-username
-    Input Text    id=okta-signin-username    ${OKTA_USER}
-    Input Text    id=okta-signin-password    ${OKTA_PASS}
-    Click Button    id=okta-signin-submit
-
-    Run Keyword And Ignore Error    Handle MFA
-
-    # Launch app dynamically (GitLab, AWS, Jira, etc.)
-    Launch Okta App
-
-
-Launch Okta App
-    Log To Console    --- Launching Okta App: ${APP_URL} ---
-
-    # Wait for Okta App Row Dashboard to load
-    Wait Until Page Contains Element
-    ...    xpath=//span[@data-se='app-row-app-label']
-    ...    timeout=30s
-    
-    # Correct Dynamic Tile Locator for Classic UI
-    ${APP_TILE}=    Set Variable
-    ...    xpath=//span[
-    ...        @data-se='app-row-app-label'
-    ...        and contains(normalize-space(.), '${APP_URL}')
-    ...    ]
-
-
-
-    Log To Console    App Tile Locator: ${APP_TILE}
-
-    # Before clicking tile, capture current tabs
-    ${before}=    Get Window Handles
-
-    # Click Okta App Tile (e.g., GitLab)
-    Click Element    ${APP_TILE}
-    Sleep    2s
-
-    # Wait for new app tab to open
-    Wait Until Keyword Succeeds    10x    1s    Wait For New Tab    ${before}
-
-    # Switch to newest tab
-    Switch To Latest Tab
-
-    Log To Console    --- ${APP_URL} App opened in new tab successfully ---
-
-
-Handle MFA
-    Sleep    3s
-
-
-Wait For New Tab
-    [Arguments]    ${before}
-    ${after}=    Get Window Handles
-    Should Be True    ${len(${after})} > ${len(${before})}    New tab not opened yet.
-
-
-Switch To Latest Tab
-    ${tabs}=    Get Window Handles
-    ${last}=    Set Variable    ${tabs}[-1]
-    Switch Window    handle=${last}
-
-
-Capture Screenshot
-    Capture Page Screenshot    results/screenshot_${TEST NAME}.png
-
-
-
-
-
-
-
-
-
+import os
+
+from lib.exceptions import exception_handler
+from lib.sharepoint_apis import Sharepoint
+from lib.utils import (get_required_attr, invoke_stepfunction, s3_get_object, s3_list_contents, extract_software_name,
+                        email_validator)
+from lib.utils import S3_VIRTUAL_LIBRARY_FOLDER_NAME, SUPPORT_EMAILS
+from lib.exceptions import ApplicationError
+
+FILE_TRANSFER_SIZE_LIMIT = 10 * 1024 * 1024  # 10 MB
+
+
+@exception_handler
+def lambda_handler(event, context, logger):
+    # Extract required event attributes
+    attr_values = get_required_attr(event, 'request_num', 'requested_for', 'requested_by', 'bucket_key')
+    request_num = attr_values['request_num']
+    requested_for = attr_values['requested_for']
+    requested_by = attr_values['requested_by']
+    support_emails = os.getenv(SUPPORT_EMAILS, '').split(',')
+
+    recipients = attr_values['requested_for'].split(",")
+    bucket_key = attr_values['bucket_key']
+    bucket_name = os.environ['LIBRARY_BUCKET_NAME']
+    bucket_key, software_name = extract_software_name(request_num=request_num, bucket_key=bucket_key)
+
+    # List S3 objects under the given prefix
+    objects, total_files_count = s3_list_contents(logger=logger, bucket_name=bucket_name, object_key=bucket_key)
+    # Fail if no objects/folders exists in S3
+    if len(objects) == 0:
+        raise ApplicationError("No data found in Virtual Library.")
+
+    # SharePoint
+    sharepoint = Sharepoint(logger=logger)
+    # Create Sharepoint folder request_num
+    sharepoint.create_folder(folder_name=request_num)
+    # Create Folder with Software_name
+    sharepoint.create_subfolder(existing_folder=request_num, folder_name=software_name)
+    # Sharepoint create/upload files logic
+    invoke_sf_flow = False
+    # Lambda should only process single files. additional folders should be handled by step function. -- Design
+    if len(objects) == 1 and total_files_count == 1:
+        for obj in objects:
+            key = obj['Key']
+            if key.startswith(S3_VIRTUAL_LIBRARY_FOLDER_NAME):
+                key = key.removeprefix(S3_VIRTUAL_LIBRARY_FOLDER_NAME + "/")
+            if key.startswith(software_name):
+                key = key.removeprefix(software_name + "/")
+            # Extract the filename
+            file_name = os.path.basename(key)
+            # Extract the directory path
+            directory_path = os.path.dirname(key)
+            path_ids = [request_num, software_name]
+            if directory_path:
+                # Create folders even if file doesn't exists
+                sharepoint.create_subfolder(existing_folder=request_num + "/" + software_name,
+                                            folder_name=directory_path)
+                path_ids.append(directory_path)
+            # Upload file if exists and meet requirement.
+            if file_name and 'Size' in obj and obj['Size'] <= FILE_TRANSFER_SIZE_LIMIT:
+
+                filedata = s3_get_object(logger=logger, bucket_name=bucket_name, file_key=obj['Key'])
+                sharepoint.upload_file(path_ids=path_ids, file_name=file_name,
+                                       data=filedata)
+            else:
+                invoke_sf_flow = True
+    else:
+        invoke_sf_flow = True
+    if invoke_sf_flow:
+        logger.info(f"Processing this request in Step function: {len(objects)} number of files: {total_files_count}")
+        sf_input = {
+            "request_num": request_num,
+            "bucket_key": bucket_key,
+            "requested_for": requested_for,
+            "requested_by": requested_by,
+            "library_bucket_name": bucket_name
+        }
+        logger.info("invoking step function")
+        invoke_stepfunction(logger=logger, request_num=request_num, sf_input=sf_input)
+    else:
+        # Verify Request folder exists
+        item_id = sharepoint.get_item_id(folder_name=request_num)
+        # Grant READ-ONLY access to requested_by user
+        sharepoint.grant_read_access(item_id=item_id, user_email=requested_by)
+        # Send Invite
+        invite = sharepoint.send_invite(item_id=item_id,
+                                        request_number=request_num,
+                                        software_title=software_name,
+                                        recipients=[email for email in ([requested_for] + support_emails) if
+                                                    email_validator(email)],
+                                        operation='checkout')
+        logger.info(f"Invite response: {invite}")
+    sharepoint_url = sharepoint.get_sharepoint_url(folder_name=request_num, operation='checkout')
+    return {
+        'statusCode': 200,
+        'sharepointUrl': sharepoint_url
+    }
