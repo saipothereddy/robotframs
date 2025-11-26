@@ -95,3 +95,27 @@ def lambda_handler(event, context, logger):
         'statusCode': 200,
         'sharepointUrl': sharepoint_url
     }
+
+
+
+
+
+    def grant_read_access(self, item_id, user_email):
+        """
+        Grant READ-ONLY access to a drive item for a specific user without sending an invitation email.
+        """
+        assert_value(item_id, 'Sharepoint item_id cannot be empty.')
+        assert_value(user_email, 'User email cannot be empty.')
+
+        url = f"{self.GRAPH_API}/drives/{self.drive_id}/items/{item_id}/invite"
+
+        invite_payload = {
+            "recipients": [{"email": user_email}],
+            "requireSignIn": True,
+            "sendInvitation": False,
+            "roles": ["read"]
+        }
+
+        response = self.send_api_request(url=url, method="POST", data=invite_payload)
+        self.logger.info(f"Granted read access to {user_email} for item {item_id}. Response: {json.dumps(response)}")
+        return response
