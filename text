@@ -1,1 +1,68 @@
+import os
+import logging
+import urllib3 # disabling warnings
+import time
+from timeit_decorator import timeit
+from lib.sharepoint_apis import Sharepoint
+# import lib.config
+import watchtower
+import boto3
+import logging
+from dotenv import load_dotenv
 
+urllib3.disable_warnings()
+AWS_DEFAULT_REGION="us-east-1"
+boto3_logs_client = boto3.client("logs", region_name=AWS_DEFAULT_REGION)
+logging.basicConfig(level=logging.INFO)
+logger=logging.getLogger(__name__)
+env = os.getenv("APP_ENV","development")
+dotenv_path=os.path.join(os.path.dirname(__file__),"..","config",f'{env}.env')
+#Load all variables from development.env or production.env
+load_dotenv(dotenv_path=dotenv_path,override=True)
+
+#Populate the environment variables
+LOG_GROUP_NAME=os.getenv('LOG_GROUP_NAME')
+S3_BUCKET=os.getenv('S3_BUCKET')
+ECSL_SHAREPOINT_CREDS_SECRET=os.getenv('ECSL_SHAREPOINT_CREDS_SECRET')
+LOG_STREAM_NAME=os.getenv('LOG_STREAM_NAME')
+# #Add Cloudwatch log group and stream to forward logs to
+logger.addHandler(watchtower.CloudWatchLogHandler(log_group_name=LOG_GROUP_NAME,log_stream_name=LOG_STREAM_NAME,use_queues=False))
+# Add console stream handler as well
+console_handler=logging.StreamHandler()
+logger.addHandler(console_handler)
+
+
+
+
+
+if __name__ == "__main__":
+    try:
+        # Fetch the S3Key and Request Number from environment variables
+        filewithpath=os.getenv('S3_KEY')
+        request_num=os.getenv('REQUEST_NUM')
+        requested_by = os.getenv('REQUESTED_BY')
+        logger.debug("Request Number:%s and filepath:%s",request_num,filewithpath)
+        logger.debug("Initializing Connections...")
+        sharepoint=Sharepoint(logger=logger)
+
+        logging.info("Uploading S3 File...")
+        start_time=time.perf_counter()
+        uploaded_file=sharepoint.upload_s3file(s3_key=filewithpath,request_num=request_num)
+        try:
+            sharepoint_url = uploaded_file['webUrl']
+            logger.info("WebUrl of uploaded file..%s",uploaded_file['webUrl'])
+
+        except Exception as e:
+            logger.debug("exception string")
+            logger.error(str(e))
+            sys.exit(1)
+        logger.info(f"Granting READ access for user: {requested_by}")
+
+        item_id = sharepoint.get_item_id(folder_name=request_num)
+        sharepoint.grant_read_access(item_id=item_id, user_email=requested_by)
+
+        logger.info(f"Successfully granted READ access to {requested_by} on folder {request_num}")
+
+    except Exception as e:
+        logger.error(str(e))
+        sys.exit(1)
