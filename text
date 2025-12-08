@@ -1,1 +1,12 @@
+    if email_validator(requested_by):
 
+        if operation == "checkout":
+            logger.info(f"Granting READ access to: {requested_by}")
+            sharepoint.grant_read_access(item_id=item_id, user_email=requested_by)
+
+        else:  # checkin
+            logger.info(f"Granting WRITE access to: {requested_by}")
+            sharepoint.grant_write_access(item_id=item_id, user_email=requested_by)
+
+    else:
+        logger.error(f"Invalid requested_by email: {requested_by}")
