@@ -1,12 +1,375 @@
-    if email_validator(requested_by):
+18.1
+Enhancements
+Improved CI/CD performance and pipeline stability
 
-        if operation == "checkout":
-            logger.info(f"Granting READ access to: {requested_by}")
-            sharepoint.grant_read_access(item_id=item_id, user_email=requested_by)
 
-        else:  # checkin
-            logger.info(f"Granting WRITE access to: {requested_by}")
-            sharepoint.grant_write_access(item_id=item_id, user_email=requested_by)
+Maven virtual repository (beta)
 
-    else:
-        logger.error(f"Invalid requested_by email: {requested_by}")
+
+GitLab Duo improvements
+
+
+Security / Bug Fixes
+Several vulnerability patches
+
+
+Authentication fixes
+
+
+Runner stability updates
+
+
+Breaking Changes
+Minor API behavior changes
+
+
+Some internal schema updates
+
+
+Deprecations
+Early warning notices for future 18.x removals
+
+
+Impact
+Low–Medium. Mostly performance and security updates.
+
+18.1.3
+Enhancements
+Minor UI/UX improvements
+
+
+Security Fixes
+Patch for critical vulnerabilities
+
+
+Breaking Changes
+None reported
+Deprecations
+None
+Impact
+Low.
+
+18.1.4
+Enhancements
+Optimizations for package registry
+
+
+Security Fixes
+Fixes for CVEs affecting Git operations
+
+
+Breaking Changes
+None
+Impact
+Low.
+
+18.1.5
+Enhancements
+CI pipeline reliability improvements
+
+
+Security Fixes
+Token-related security fixes
+
+
+Breaking Changes
+None
+Impact
+Low.
+18.1.6
+Enhancements
+Minor backend performance improvements
+
+
+Security Fixes
+Geo replication fixes
+
+
+Permission vulnerability patches
+
+
+Breaking Changes
+None
+Impact
+Low.
+
+18.2
+Enhancements
+Major improvements to container scanning
+
+
+Archive scanning support
+
+
+Enhanced SAST/DAST reporting
+
+
+Security Fixes
+Several security patches included
+
+
+Breaking Changes
+Some scanning behavior changes
+
+
+Stricter JSON input handling begins
+
+
+Deprecations
+Older scanning analyzers flagged
+
+
+Impact
+Medium (mainly DevSecOps pipeline impact).
+
+18.2.1 → 18.2.8 (all patches)
+Across all patch versions:
+Enhancements
+Incremental performance updates
+
+
+Stability improvements for CI, Geo, Gitaly
+
+
+Security Fixes
+Multiple CVE patches
+
+
+Input validation tightening (may affect integrations)
+
+
+Breaking Changes
+JSON payload limits introduced → API clients with large payloads may fail
+
+
+Deprecations
+None major
+Impact
+Low–Medium depending on API usage.
+
+18.3
+Enhancements
+Fine-grained CI job token permissions
+
+
+DAST output improvements
+
+
+IDE integration upgrades (VS Code, JetBrains)
+
+
+Security Fixes
+Secret detection fixes
+
+
+Permission tightening
+
+
+Breaking Changes
+CI job token restrictions may break old pipelines
+
+
+Deprecations
+Older authentication models deprecated
+
+
+Impact
+Medium (CI jobs may require permission updates).
+
+18.3.1 → 18.3.6 (all patches)
+Enhancements
+Better repository migration (Direct Transfer)
+
+
+Faster pipeline startup times
+
+
+Security Fixes
+Multiple high-severity fixes
+
+
+Breaking Changes
+None major, but permissions tightening continues
+Impact
+Low–Medium.
+
+18.4
+Enhancements
+GitLab Duo Model Selection
+
+
+GitLab Knowledge Graph
+
+
+Performance improvements
+
+
+Security Fixes
+Geo reliability fixes
+
+
+Abuse prevention enhancements
+
+
+Breaking Changes
+JSON input size limits enforced → API failures possible
+
+
+Deprecations
+Older AI models marked for removal
+
+
+Impact
+Medium (API strictness + AI feature evolution).
+
+18.4.1 → 18.4.4
+Enhancements
+Additional AI catalog improvements
+
+
+Backend performance improvements
+
+
+Security Fixes
+Patch releases contain important CVE fixes
+
+
+Breaking Changes
+None
+Impact
+Low.
+
+18.5
+Enhancements
+GitLab Duo Security Analyst Agent
+
+
+Static Reachability (beta)
+
+
+Coverage improvements (JS/TS)
+
+
+Security Fixes
+Multiple critical fixes
+
+
+Breaking Changes
+Removal of older Duo models
+
+
+Static reachability may alter job behavior
+
+
+Deprecations
+Legacy AI endpoints deprecated
+
+
+Impact
+Medium (AI & security pipeline behavior changes).
+
+18.5.1 → 18.5.2
+Enhancements
+Stability improvements for pipelines
+
+
+Security Fixes
+Several vulnerability fixes
+
+
+Breaking Changes
+None
+Impact
+Low.
+18.6
+Enhancements
+New redesigned UI
+
+
+Exact Code Search improvements
+
+
+CI/CD component metadata enhancements
+
+
+Performance upgrades
+
+
+Security Fixes
+Critical fixes ahead of 18.6.1
+
+
+Breaking Changes
+Setting to disable exact code search removed
+
+
+Some search behavior is permanently changed
+
+
+Deprecations
+None major
+Impact
+Medium (Search subsystem changed).
+
+18.6.1 (Latest)
+Enhancements
+Stability improvements
+
+
+Better import/export performance
+
+
+Security Fixes
+Several critical vulnerabilities addressed
+
+
+Breaking Changes
+Database migrations required
+
+
+Possible downtime on single-node setups
+
+
+Deprecations
+None
+Impact
+Medium–High (due to DB migrations and search changes).
+
+
+
+
+GitLab 18.6.2
+Enhancements
+Performance improvements in CI pipeline evaluation.
+
+
+Improvements to container registry background tasks.
+
+
+UI refinements to the new 18.6 navigation experience.
+
+
+Security / Bug Fixes
+Fix for intermittent OAuth login failures.
+
+
+Fix for stuck background migrations in Geo-enabled environments.
+
+
+Patch for vulnerability related to pipeline permissions inheritance.
+
+
+Breaking Changes
+Minor schema alignment in audit event logs (non-user facing but may affect log parsers).
+
+
+Updated internal API behaviors for merge request widget rendering (only affects custom integrations).
+
+
+Removals / Deprecations
+Further cleanup of deprecated AI (Duo) model endpoints.
+
+
+Removal of legacy pagination format from a few internal API endpoints (no customer-facing API removed).
+
+
