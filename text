@@ -1,375 +1,151 @@
-18.1
-Enhancements
-Improved CI/CD performance and pipeline stability
-
-
-Maven virtual repository (beta)
-
-
-GitLab Duo improvements
-
-
-Security / Bug Fixes
-Several vulnerability patches
-
-
-Authentication fixes
-
-
-Runner stability updates
-
-
-Breaking Changes
-Minor API behavior changes
-
-
-Some internal schema updates
-
-
-Deprecations
-Early warning notices for future 18.x removals
-
-
-Impact
-Low–Medium. Mostly performance and security updates.
-
-18.1.3
-Enhancements
-Minor UI/UX improvements
-
-
-Security Fixes
-Patch for critical vulnerabilities
-
-
-Breaking Changes
-None reported
-Deprecations
-None
-Impact
-Low.
-
-18.1.4
-Enhancements
-Optimizations for package registry
-
-
-Security Fixes
-Fixes for CVEs affecting Git operations
-
-
-Breaking Changes
-None
-Impact
-Low.
-
-18.1.5
-Enhancements
-CI pipeline reliability improvements
-
-
-Security Fixes
-Token-related security fixes
-
-
-Breaking Changes
-None
-Impact
-Low.
-18.1.6
-Enhancements
-Minor backend performance improvements
-
-
-Security Fixes
-Geo replication fixes
-
-
-Permission vulnerability patches
-
-
-Breaking Changes
-None
-Impact
-Low.
-
-18.2
-Enhancements
-Major improvements to container scanning
-
-
-Archive scanning support
-
-
-Enhanced SAST/DAST reporting
-
-
-Security Fixes
-Several security patches included
-
-
-Breaking Changes
-Some scanning behavior changes
-
-
-Stricter JSON input handling begins
-
-
-Deprecations
-Older scanning analyzers flagged
-
-
-Impact
-Medium (mainly DevSecOps pipeline impact).
-
-18.2.1 → 18.2.8 (all patches)
-Across all patch versions:
-Enhancements
-Incremental performance updates
-
-
-Stability improvements for CI, Geo, Gitaly
-
-
-Security Fixes
-Multiple CVE patches
-
-
-Input validation tightening (may affect integrations)
-
-
-Breaking Changes
-JSON payload limits introduced → API clients with large payloads may fail
-
-
-Deprecations
-None major
-Impact
-Low–Medium depending on API usage.
-
-18.3
-Enhancements
-Fine-grained CI job token permissions
-
-
-DAST output improvements
-
-
-IDE integration upgrades (VS Code, JetBrains)
-
-
-Security Fixes
-Secret detection fixes
-
-
-Permission tightening
-
-
-Breaking Changes
-CI job token restrictions may break old pipelines
-
-
-Deprecations
-Older authentication models deprecated
-
-
-Impact
-Medium (CI jobs may require permission updates).
-
-18.3.1 → 18.3.6 (all patches)
-Enhancements
-Better repository migration (Direct Transfer)
-
-
-Faster pipeline startup times
-
-
-Security Fixes
-Multiple high-severity fixes
-
-
-Breaking Changes
-None major, but permissions tightening continues
-Impact
-Low–Medium.
-
-18.4
-Enhancements
-GitLab Duo Model Selection
-
-
-GitLab Knowledge Graph
-
-
-Performance improvements
-
-
-Security Fixes
-Geo reliability fixes
-
-
-Abuse prevention enhancements
-
-
-Breaking Changes
-JSON input size limits enforced → API failures possible
-
-
-Deprecations
-Older AI models marked for removal
-
-
-Impact
-Medium (API strictness + AI feature evolution).
-
-18.4.1 → 18.4.4
-Enhancements
-Additional AI catalog improvements
-
-
-Backend performance improvements
-
-
-Security Fixes
-Patch releases contain important CVE fixes
-
-
-Breaking Changes
-None
-Impact
-Low.
-
-18.5
-Enhancements
-GitLab Duo Security Analyst Agent
-
-
-Static Reachability (beta)
-
-
-Coverage improvements (JS/TS)
-
-
-Security Fixes
-Multiple critical fixes
-
-
-Breaking Changes
-Removal of older Duo models
-
-
-Static reachability may alter job behavior
-
-
-Deprecations
-Legacy AI endpoints deprecated
-
-
-Impact
-Medium (AI & security pipeline behavior changes).
-
-18.5.1 → 18.5.2
-Enhancements
-Stability improvements for pipelines
-
-
-Security Fixes
-Several vulnerability fixes
-
-
-Breaking Changes
-None
-Impact
-Low.
-18.6
-Enhancements
-New redesigned UI
-
-
-Exact Code Search improvements
-
-
-CI/CD component metadata enhancements
-
-
-Performance upgrades
-
-
-Security Fixes
-Critical fixes ahead of 18.6.1
-
-
-Breaking Changes
-Setting to disable exact code search removed
-
-
-Some search behavior is permanently changed
-
-
-Deprecations
-None major
-Impact
-Medium (Search subsystem changed).
-
-18.6.1 (Latest)
-Enhancements
-Stability improvements
-
-
-Better import/export performance
-
-
-Security Fixes
-Several critical vulnerabilities addressed
-
-
-Breaking Changes
-Database migrations required
-
-
-Possible downtime on single-node setups
-
-
-Deprecations
-None
-Impact
-Medium–High (due to DB migrations and search changes).
-
-
-
-
-GitLab 18.6.2
-Enhancements
-Performance improvements in CI pipeline evaluation.
-
-
-Improvements to container registry background tasks.
-
-
-UI refinements to the new 18.6 navigation experience.
-
-
-Security / Bug Fixes
-Fix for intermittent OAuth login failures.
-
-
-Fix for stuck background migrations in Geo-enabled environments.
-
-
-Patch for vulnerability related to pipeline permissions inheritance.
-
-
-Breaking Changes
-Minor schema alignment in audit event logs (non-user facing but may affect log parsers).
-
-
-Updated internal API behaviors for merge request widget rendering (only affects custom integrations).
-
-
-Removals / Deprecations
-Further cleanup of deprecated AI (Duo) model endpoints.
-
-
-Removal of legacy pagination format from a few internal API endpoints (no customer-facing API removed).
-
-
+import os
+import json
+import base64
+import boto3
+import secrets
+import string
+import subprocess
+from botocore.signers import RequestSigner
+from botocore.session import Session
+
+# ================= ENV =================
+REGION = os.environ["AWS_REGION"]
+DB_INSTANCE_ID = os.environ["DB_INSTANCE_ID"]
+SECRET_ID = os.environ["SECRET_ID"]
+EKS_CLUSTER_NAME = os.environ["EKS_CLUSTER_NAME"]
+
+HELM_RELEASE = os.environ["HELM_RELEASE"]
+HELM_CHART = os.environ["HELM_CHART"]
+HELM_NAMESPACE = os.environ["HELM_NAMESPACE"]
+
+DEPLOYMENT_NAME = os.environ["DEPLOYMENT_NAME"]
+REPLICA_COUNT = os.environ["REPLICA_COUNT"]
+
+# ================= AWS CLIENTS =================
+rds = boto3.client("rds", region_name=REGION)
+secretsmanager = boto3.client("secretsmanager", region_name=REGION)
+eks = boto3.client("eks", region_name=REGION)
+
+# ================= HELPERS =================
+
+def generate_password(length=32):
+    chars = string.ascii_letters + string.digits + "!@#$%^&*"
+    return ''.join(secrets.choice(chars) for _ in range(length))
+
+
+def write_kubeconfig():
+    cluster = eks.describe_cluster(name=EKS_CLUSTER_NAME)["cluster"]
+
+    session = Session()
+    signer = RequestSigner(
+        service_id="sts",
+        region_name=REGION,
+        signing_name="sts",
+        signature_version="v4",
+        credentials=session.get_credentials(),
+        event_emitter=session.events,
+    )
+
+    params = {
+        "method": "GET",
+        "url": "https://sts.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15",
+        "body": {},
+        "headers": {"x-k8s-aws-id": EKS_CLUSTER_NAME},
+        "context": {},
+    }
+
+    signed_url = signer.generate_presigned_url(
+        params, region_name=REGION, expires_in=60
+    )
+
+    token = "k8s-aws-v1." + base64.urlsafe_b64encode(
+        signed_url.encode()
+    ).decode().rstrip("=")
+
+    kubeconfig = f"""
+apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: {cluster['endpoint']}
+    certificate-authority-data: {cluster['certificateAuthority']['data']}
+  name: eks
+contexts:
+- context:
+    cluster: eks
+    user: eks-user
+  name: eks
+current-context: eks
+users:
+- name: eks-user
+  user:
+    token: {token}
+"""
+
+    with open("/tmp/kubeconfig", "w") as f:
+        f.write(kubeconfig)
+
+    os.environ["KUBECONFIG"] = "/tmp/kubeconfig"
+
+
+def run(cmd):
+    subprocess.check_call(cmd, shell=True)
+
+
+# ================= LAMBDA HANDLER =================
+
+def lambda_handler(event, context):
+
+    # Read existing secret
+    secret = json.loads(
+        secretsmanager.get_secret_value(
+            SecretId=SECRET_ID
+        )["SecretString"]
+    )
+
+    # Generate new password
+    new_password = generate_password()
+
+    # Rotate password in RDS
+    rds.modify_db_instance(
+        DBInstanceIdentifier=DB_INSTANCE_ID,
+        MasterUserPassword=new_password,
+        ApplyImmediately=True
+    )
+
+    # Rotate password in Secrets Manager
+    secret["password"] = new_password
+    secretsmanager.put_secret_value(
+        SecretId=SECRET_ID,
+        SecretString=json.dumps(secret)
+    )
+
+    # Prepare kubeconfig
+    write_kubeconfig()
+
+    # Helm upgrade (update DB password in values.yaml)
+    run(f"""
+helm upgrade {HELM_RELEASE} {HELM_CHART} \
+  -n {HELM_NAMESPACE} \
+  --reuse-values \
+  --set database.password='{new_password}'
+""")
+
+    # Scale DOWN Nexus IQ
+    run(f"""
+kubectl scale deployment {DEPLOYMENT_NAME} \
+  -n {HELM_NAMESPACE} \
+  --replicas=0
+""")
+
+    # 8️⃣ Scale UP Nexus IQ
+    run(f"""
+kubectl scale deployment {DEPLOYMENT_NAME} \
+  -n {HELM_NAMESPACE} \
+  --replicas={REPLICA_COUNT}
+""")
+
+    return {
+        "status": "SUCCESS",
+        "message": "RDS password rotated, secret updated, Helm upgraded, Nexus IQ restarted via scaling"
+    }
