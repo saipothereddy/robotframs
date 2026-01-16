@@ -1,5 +1,4 @@
 import os
-import json
 import base64
 import boto3
 import secrets
@@ -11,7 +10,7 @@ from botocore.session import Session
 # ================= ENV =================
 REGION = os.environ["AWS_REGION"]
 DB_INSTANCE_ID = os.environ["DB_INSTANCE_ID"]
-SECRET_ID = os.environ["SECRET_ID"]
+SSM_PARAMETER_NAME = os.environ["SSM_PARAMETER_NAME"]
 EKS_CLUSTER_NAME = os.environ["EKS_CLUSTER_NAME"]
 
 HELM_RELEASE = os.environ["HELM_RELEASE"]
@@ -23,7 +22,7 @@ REPLICA_COUNT = os.environ["REPLICA_COUNT"]
 
 # ================= AWS CLIENTS =================
 rds = boto3.client("rds", region_name=REGION)
-secretsmanager = boto3.client("secretsmanager", region_name=REGION)
+ssm = boto3.client("ssm", region_name=REGION)
 eks = boto3.client("eks", region_name=REGION)
 
 # ================= HELPERS =================
@@ -66,20 +65,20 @@ def write_kubeconfig():
 apiVersion: v1
 kind: Config
 clusters:
-- cluster:
+- name: eks
+  cluster:
     server: {cluster['endpoint']}
     certificate-authority-data: {cluster['certificateAuthority']['data']}
-  name: eks
-contexts:
-- context:
-    cluster: eks
-    user: eks-user
-  name: eks
-current-context: eks
 users:
 - name: eks-user
   user:
     token: {token}
+contexts:
+- name: eks
+  context:
+    cluster: eks
+    user: eks-user
+current-context: eks
 """
 
     with open("/tmp/kubeconfig", "w") as f:
@@ -89,19 +88,12 @@ users:
 
 
 def run(cmd):
-    subprocess.check_call(cmd, shell=True)
+    subprocess.check_call(cmd)
 
 
 # ================= LAMBDA HANDLER =================
 
 def lambda_handler(event, context):
-
-    # Read existing secret
-    secret = json.loads(
-        secretsmanager.get_secret_value(
-            SecretId=SECRET_ID
-        )["SecretString"]
-    )
 
     # Generate new password
     new_password = generate_password()
@@ -113,39 +105,40 @@ def lambda_handler(event, context):
         ApplyImmediately=True
     )
 
-    # Rotate password in Secrets Manager
-    secret["password"] = new_password
-    secretsmanager.put_secret_value(
-        SecretId=SECRET_ID,
-        SecretString=json.dumps(secret)
+    #  Update password in SSM Parameter Store
+    ssm.put_parameter(
+        Name=SSM_PARAMETER_NAME,
+        Value=new_password,
+        Type="SecureString",
+        Overwrite=True
     )
 
     # Prepare kubeconfig
     write_kubeconfig()
 
-    # Helm upgrade (update DB password in values.yaml)
-    run(f"""
-helm upgrade {HELM_RELEASE} {HELM_CHART} \
-  -n {HELM_NAMESPACE} \
-  --reuse-values \
-  --set database.password='{new_password}'
-""")
+    # Helm upgrade (update DB password)
+    run([
+        "helm", "upgrade", HELM_RELEASE, HELM_CHART,
+        "-n", HELM_NAMESPACE,
+        "--reuse-values",
+        "--set-string", f"database.password={new_password}"
+    ])
 
     # Scale DOWN Nexus IQ
-    run(f"""
-kubectl scale deployment {DEPLOYMENT_NAME} \
-  -n {HELM_NAMESPACE} \
-  --replicas=0
-""")
+    run([
+        "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
+        "-n", HELM_NAMESPACE,
+        "--replicas=0"
+    ])
 
-    # 8️⃣ Scale UP Nexus IQ
-    run(f"""
-kubectl scale deployment {DEPLOYMENT_NAME} \
-  -n {HELM_NAMESPACE} \
-  --replicas={REPLICA_COUNT}
-""")
+    # Scale UP Nexus IQ
+    run([
+        "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
+        "-n", HELM_NAMESPACE,
+        f"--replicas={REPLICA_COUNT}"
+    ])
 
     return {
         "status": "SUCCESS",
-        "message": "RDS password rotated, secret updated, Helm upgraded, Nexus IQ restarted via scaling"
+        "message": "RDS password rotated, SSM updated, Helm upgraded, Nexus IQ restarted"
     }
