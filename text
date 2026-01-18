@@ -131,7 +131,11 @@ def lambda_handler(event, context):
     }
 
 
-
+def lambda_handler(event, context):
+    return subprocess.check_output(
+        ["/opt/bin/aws", "eks", "list-clusters", "--region", "us-east-1"],
+        text=True
+    )
 
 def generate_password(length=32):
     allowed_specials = "!#$^*_-+="
