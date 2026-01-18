@@ -6,6 +6,7 @@ import string
 import subprocess
 from botocore.signers import RequestSigner
 from botocore.session import Session
+import json
 
 # ================= ENV =================
 REGION = os.environ["AWS_REGION"]
@@ -35,37 +36,17 @@ def generate_password(length=32):
 def write_kubeconfig():
     cluster = eks.describe_cluster(name=EKS_CLUSTER_NAME)["cluster"]
 
-    boto3_session = boto3.session.Session()
-
-    credentials = boto3_session.get_credentials()
-    botocore_session = boto3_session._session
-
-    signer = RequestSigner(
-        service_id="sts",
-        region_name=REGION,
-        signing_name="sts",
-        signature_version="v4",
-        credentials=credentials,
-        event_emitter=botocore_session.events,
+    # Get token using AWS CLI (official & stable)
+    token_json = subprocess.check_output(
+        [
+            "aws", "eks", "get-token",
+            "--cluster-name", EKS_CLUSTER_NAME,
+            "--region", REGION
+        ],
+        text=True
     )
 
-    params = {
-        "method": "GET",
-        "url": "https://sts.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15",
-        "body": {},
-        "headers": {"x-k8s-aws-id": EKS_CLUSTER_NAME},
-        "context": {},
-    }
-
-    signed_url = signer.generate_presigned_url(
-        params,
-        region_name=REGION,
-        expires_in=60
-    )
-
-    token = "k8s-aws-v1." + base64.urlsafe_b64encode(
-        signed_url.encode()
-    ).decode().rstrip("=")
+    token = json.loads(token_json)["status"]["token"]
 
     kubeconfig = f"""
 apiVersion: v1
