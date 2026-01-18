@@ -35,14 +35,18 @@ def generate_password(length=32):
 def write_kubeconfig():
     cluster = eks.describe_cluster(name=EKS_CLUSTER_NAME)["cluster"]
 
-    session = Session()
+    boto3_session = boto3.session.Session()
+
+    credentials = boto3_session.get_credentials()
+    botocore_session = boto3_session._session
+
     signer = RequestSigner(
         service_id="sts",
         region_name=REGION,
         signing_name="sts",
         signature_version="v4",
-        credentials=session.get_credentials(),
-        event_emitter=session.events,
+        credentials=credentials,
+        event_emitter=botocore_session.events,
     )
 
     params = {
@@ -54,7 +58,9 @@ def write_kubeconfig():
     }
 
     signed_url = signer.generate_presigned_url(
-        params, region_name=REGION, expires_in=60
+        params,
+        region_name=REGION,
+        expires_in=60
     )
 
     token = "k8s-aws-v1." + base64.urlsafe_b64encode(
@@ -99,8 +105,8 @@ def lambda_handler(event, context):
     new_password = generate_password()
 
     # Rotate password in RDS
-    rds.modify_db_instance(
-        DBInstanceIdentifier=DB_INSTANCE_ID,
+    rds.modify_db_Cluster(
+        DBClusterIdentifier=DB_INSTANCE_ID,
         MasterUserPassword=new_password,
         ApplyImmediately=True
     )
