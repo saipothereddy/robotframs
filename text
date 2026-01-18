@@ -129,3 +129,11 @@ def lambda_handler(event, context):
         "status": "SUCCESS",
         "message": "RDS password rotated, SSM updated, Helm upgraded, Nexus IQ restarted"
     }
+
+
+
+
+def generate_password(length=32):
+    allowed_specials = "!#$^*_-+="
+    chars = string.ascii_letters + string.digits + allowed_specials
+    return ''.join(secrets.choice(chars) for _ in range(length))
