@@ -130,22 +130,3 @@ def lambda_handler(event, context):
         "message": "RDS password rotated, SSM updated, Helm upgraded, Nexus IQ restarted"
     }
 
-
-def lambda_handler(event, context):
-    return subprocess.check_output(
-        ["/opt/bin/aws", "eks", "list-clusters", "--region", "us-east-1"],
-        text=True
-    )
-
-def generate_password(length=32):
-    allowed_specials = "!#$^*_-+="
-    chars = string.ascii_letters + string.digits + allowed_specials
-    return ''.join(secrets.choice(chars) for _ in range(length))
-
-
-
-def lambda_handler(event, context):
-    return subprocess.check_output(
-        ["/opt/bin/aws", "sts", "get-caller-identity"],
-        text=True
-    )
