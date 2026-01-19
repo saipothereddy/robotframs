@@ -5,9 +5,7 @@ import base64
 import secrets
 import string
 import subprocess
-import botocore.session
-from botocore.signers import RequestSigner
-
+import time
 
 # ================= ENV =================
 REGION = os.environ["AWS_REGION"]
@@ -23,6 +21,10 @@ HELM_NAMESPACE = os.environ["HELM_NAMESPACE"]
 DEPLOYMENT_NAME = os.environ["DEPLOYMENT_NAME"]
 REPLICA_COUNT = os.environ["REPLICA_COUNT"]
 
+# ================= BIN PATHS =================
+HELM = "/opt/bin/helm"
+KUBECTL = "/opt/bin/kubectl"
+
 # ================= AWS CLIENTS =================
 rds = boto3.client("rds", region_name=REGION)
 ssm = boto3.client("ssm", region_name=REGION)
@@ -31,9 +33,7 @@ eks = boto3.client("eks", region_name=REGION)
 # ================= HELPERS =================
 
 def generate_password(length=32):
-    """
-    Aurora-safe password generator
-    """
+    """Aurora-safe password"""
     chars = string.ascii_letters + string.digits + "!#$^*_-+=?"
     return ''.join(secrets.choice(chars) for _ in range(length))
 
@@ -45,7 +45,6 @@ def write_kubeconfig():
     ca_data = cluster["certificateAuthority"]["data"]
 
     sts = boto3.client("sts", region_name=REGION)
-
     presigned_url = sts.generate_presigned_url(
         "get_caller_identity",
         Params={},
@@ -83,6 +82,23 @@ current-context: eks
     os.environ["KUBECONFIG"] = "/tmp/kubeconfig"
 
 
+def apply_db_secret(password):
+    """Create or update Kubernetes Secret safely"""
+    p = subprocess.Popen(
+        [
+            KUBECTL, "create", "secret", "generic", "nexus-db-secret",
+            "-n", HELM_NAMESPACE,
+            f"--from-literal=password={password}",
+            "--dry-run=client", "-o", "yaml"
+        ],
+        stdout=subprocess.PIPE
+    )
+
+    subprocess.check_call(
+        [KUBECTL, "apply", "-f", "-"],
+        stdin=p.stdout
+    )
+
 
 def run(cmd):
     subprocess.check_call(cmd)
@@ -92,7 +108,7 @@ def run(cmd):
 
 def lambda_handler(event, context):
 
-    # Generate new DB password
+    # Generate new password
     new_password = generate_password()
 
     # Rotate Aurora DB password
@@ -101,6 +117,9 @@ def lambda_handler(event, context):
         MasterUserPassword=new_password,
         ApplyImmediately=True
     )
+
+    # Give Aurora time to apply password
+    time.sleep(30)
 
     # Update SSM Parameter
     ssm.put_parameter(
@@ -113,24 +132,27 @@ def lambda_handler(event, context):
     # Prepare kubeconfig
     write_kubeconfig()
 
-    # Helm upgrade with new password
+    # Create / update Kubernetes Secret
+    apply_db_secret(new_password)
+
+    # Helm upgrade (NO PASSWORD INLINE)
     run([
-        "helm", "upgrade", HELM_RELEASE, HELM_CHART,
+        HELM, "upgrade", HELM_RELEASE, HELM_CHART,
         "-n", HELM_NAMESPACE,
         "--reuse-values",
-        "--set-string", f"database.password={new_password}"
+        "--set-string", "database.existingSecret=nexus-db-secret"
     ])
 
     # Scale DOWN Nexus IQ
     run([
-        "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
+        KUBECTL, "scale", "deployment", DEPLOYMENT_NAME,
         "-n", HELM_NAMESPACE,
         "--replicas=0"
     ])
 
-    # Scale UP Nexus IQ
+    #  Scale UP Nexus IQ
     run([
-        "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
+        KUBECTL, "scale", "deployment", DEPLOYMENT_NAME,
         "-n", HELM_NAMESPACE,
         f"--replicas={REPLICA_COUNT}"
     ])
@@ -138,15 +160,4 @@ def lambda_handler(event, context):
     return {
         "status": "SUCCESS",
         "message": "Aurora password rotated, SSM updated, Helm upgraded, Nexus IQ restarted"
-    }
-
-
-
-
-import os
-
-def lambda_handler(event, context):
-    return {
-        "opt": os.listdir("/opt"),
-        "opt_bin": os.listdir("/opt/bin") if os.path.exists("/opt/bin") else "no /opt/bin"
     }
