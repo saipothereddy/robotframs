@@ -148,7 +148,7 @@ def lambda_handler(event, context):
         "--replicas=0"
     ])
 
-    # 7️⃣ Scale UP Nexus IQ
+    # Scale UP Nexus IQ
     run([
         "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
         "-n", HELM_NAMESPACE,
