@@ -1,16 +1,17 @@
 import os
-import base64
+import json
 import boto3
+import base64
 import secrets
 import string
 import subprocess
+import botocore.session
 from botocore.signers import RequestSigner
-from botocore.session import Session
-import json
 
 # ================= ENV =================
 REGION = os.environ["AWS_REGION"]
-DB_INSTANCE_ID = os.environ["DB_INSTANCE_ID"]
+
+DB_CLUSTER_ID = os.environ["DB_INSTANCE_ID"]
 SSM_PARAMETER_NAME = os.environ["SSM_PARAMETER_NAME"]
 EKS_CLUSTER_NAME = os.environ["EKS_CLUSTER_NAME"]
 
@@ -29,24 +30,53 @@ eks = boto3.client("eks", region_name=REGION)
 # ================= HELPERS =================
 
 def generate_password(length=32):
-    chars = string.ascii_letters + string.digits + "!@#$%^&*"
+    """
+    Aurora-safe password generator
+    """
+    chars = string.ascii_letters + string.digits + "!#$^*_-+=?"
     return ''.join(secrets.choice(chars) for _ in range(length))
 
 
 def write_kubeconfig():
+    """
+    Generate kubeconfig using boto3 (no aws cli)
+    """
     cluster = eks.describe_cluster(name=EKS_CLUSTER_NAME)["cluster"]
+    endpoint = cluster["endpoint"]
+    ca_data = cluster["certificateAuthority"]["data"]
 
-    # Get token using AWS CLI (official & stable)
-    token_json = subprocess.check_output(
-        [
-            "aws", "eks", "get-token",
-            "--cluster-name", EKS_CLUSTER_NAME,
-            "--region", REGION
-        ],
-        text=True
+    # Create STS token (same logic as aws eks get-token)
+    session = botocore.session.get_session()
+    credentials = session.get_credentials().get_frozen_credentials()
+
+    signer = RequestSigner(
+        service_id="sts",
+        region_name=REGION,
+        signing_name="sts",
+        signature_version="v4",
+        credentials=credentials,
+        event_emitter=session.events
     )
 
-    token = json.loads(token_json)["status"]["token"]
+    params = {
+        "method": "GET",
+        "url": "https://sts.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15",
+        "body": {},
+        "headers": {
+            "x-k8s-aws-id": EKS_CLUSTER_NAME
+        },
+        "context": {}
+    }
+
+    signed_url = signer.generate_presigned_url(
+        params,
+        region_name=REGION,
+        expires_in=60
+    )
+
+    token = "k8s-aws-v1." + base64.urlsafe_b64encode(
+        signed_url.encode("utf-8")
+    ).decode("utf-8").rstrip("=")
 
     kubeconfig = f"""
 apiVersion: v1
@@ -54,8 +84,8 @@ kind: Config
 clusters:
 - name: eks
   cluster:
-    server: {cluster['endpoint']}
-    certificate-authority-data: {cluster['certificateAuthority']['data']}
+    server: {endpoint}
+    certificate-authority-data: {ca_data}
 users:
 - name: eks-user
   user:
@@ -82,17 +112,17 @@ def run(cmd):
 
 def lambda_handler(event, context):
 
-    # Generate new password
+    # Generate new DB password
     new_password = generate_password()
 
-    # Rotate password in RDS
-    rds.modify_db_Cluster(
-        DBClusterIdentifier=DB_INSTANCE_ID,
+    # Rotate Aurora DB password
+    rds.modify_db_cluster(
+        DBClusterIdentifier=DB_CLUSTER_ID,
         MasterUserPassword=new_password,
         ApplyImmediately=True
     )
 
-    #  Update password in SSM Parameter Store
+    # Update SSM Parameter
     ssm.put_parameter(
         Name=SSM_PARAMETER_NAME,
         Value=new_password,
@@ -103,7 +133,7 @@ def lambda_handler(event, context):
     # Prepare kubeconfig
     write_kubeconfig()
 
-    # Helm upgrade (update DB password)
+    # Helm upgrade with new password
     run([
         "helm", "upgrade", HELM_RELEASE, HELM_CHART,
         "-n", HELM_NAMESPACE,
@@ -118,7 +148,7 @@ def lambda_handler(event, context):
         "--replicas=0"
     ])
 
-    # Scale UP Nexus IQ
+    # 7️⃣ Scale UP Nexus IQ
     run([
         "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
         "-n", HELM_NAMESPACE,
@@ -127,6 +157,5 @@ def lambda_handler(event, context):
 
     return {
         "status": "SUCCESS",
-        "message": "RDS password rotated, SSM updated, Helm upgraded, Nexus IQ restarted"
+        "message": "Aurora password rotated, SSM updated, Helm upgraded, Nexus IQ restarted"
     }
-
