@@ -76,13 +76,17 @@ contexts:
 current-context: eks
 """
 
+    # Write kubeconfig
     with open("/tmp/kubeconfig", "w") as f:
         f.write(kubeconfig)
 
     os.environ["KUBECONFIG"] = "/tmp/kubeconfig"
 
-def run(cmd):
-    subprocess.check_call(cmd)
+    # 🔐 PRINT KUBECONFIG (TOKEN REDACTED)
+    print("===== GENERATED KUBECONFIG (TOKEN REDACTED) =====")
+    print(kubeconfig.replace(token, "***REDACTED***"))
+    print("===== END KUBECONFIG =====")
+
 
 
 # ================= LAMBDA HANDLER =================
@@ -116,28 +120,31 @@ def lambda_handler(event, context):
     # Create / update Kubernetes Secret
     apply_db_secret(new_password)
 
-    # Helm upgrade (NO PASSWORD INLINE)
-    run([
-        HELM, "upgrade", HELM_RELEASE, HELM_CHART,
-        "-n", HELM_NAMESPACE,
-        "--reuse-values",
-        "--set-string", "database.existingSecret=nexus-db-secret"
-    ])
+#    # Helm upgrade (NO PASSWORD INLINE)
+#    run([
+#        HELM, "upgrade", HELM_RELEASE, HELM_CHART,
+#        "-n", HELM_NAMESPACE,
+#        "--reuse-values",
+#        "--set-string", "database.existingSecret=nexus-db-secret"
+#    ])
 
     # Scale DOWN Nexus IQ
-    run([
-        KUBECTL, "scale", "deployment", DEPLOYMENT_NAME,
-        "-n", HELM_NAMESPACE,
-        "--replicas=0"
-    ])
+#    run([
+#        KUBECTL, "scale", "deployment", DEPLOYMENT_NAME,
+#        "-n", HELM_NAMESPACE,
+#        "--replicas=0"
+#    ])
 
-    #  Scale UP Nexus IQ
-    run([
-        KUBECTL, "scale", "deployment", DEPLOYMENT_NAME,
-        "-n", HELM_NAMESPACE,
-        f"--replicas={REPLICA_COUNT}"
-    ])
+    #  Scale UP Nexus IQ#
+#    run([
+#        KUBECTL, "scale", "deployment", DEPLOYMENT_NAME,
+#        "-n", HELM_NAMESPACE,
+#        f"--replicas={REPLICA_COUNT}"
+#    ])
 
+    run([
+        KUBECTL, "get", "nodes"
+    ])
     return {
         "status": "SUCCESS",
         "message": "Aurora password rotated, SSM updated, Helm upgraded, Nexus IQ restarted"
