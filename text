@@ -7,62 +7,63 @@ import string
 import subprocess
 import time
 
+# ================= HARD-CODED EXPECTATIONS =================
+EXPECTED_IAM_ROLE_ARN = "arn:aws:iam::077911745872:role/aws-cicm-lab-service-role-4"
+
 # ================= ENV =================
 REGION = os.environ["AWS_REGION"]
+EKS_CLUSTER_NAME = os.environ["EKS_CLUSTER_NAME"]
 
 DB_CLUSTER_ID = os.environ["DB_INSTANCE_ID"]
 SSM_PARAMETER_NAME = os.environ["SSM_PARAMETER_NAME"]
-EKS_CLUSTER_NAME = os.environ["EKS_CLUSTER_NAME"]
-
-HELM_RELEASE = os.environ["HELM_RELEASE"]
-HELM_CHART = os.environ["HELM_CHART"]
-HELM_NAMESPACE = os.environ["HELM_NAMESPACE"]
 
 DEPLOYMENT_NAME = os.environ["DEPLOYMENT_NAME"]
+HELM_NAMESPACE = os.environ["HELM_NAMESPACE"]
 REPLICA_COUNT = os.environ["REPLICA_COUNT"]
 
 # ================= BIN PATHS =================
-HELM = "/opt/bin/helm"
 KUBECTL = "/opt/bin/kubectl"
 
 # ================= AWS CLIENTS =================
-rds = boto3.client("rds", region_name=REGION)
-ssm = boto3.client("ssm", region_name=REGION)
 eks = boto3.client("eks", region_name=REGION)
 sts = boto3.client("sts", region_name=REGION)
+rds = boto3.client("rds", region_name=REGION)
+ssm = boto3.client("ssm", region_name=REGION)
 
 # ================= HELPERS =================
 
 def run(cmd):
-    print(f"\n▶ RUNNING: {' '.join(cmd)}")
-    try:
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=True
-        )
-        print("STDOUT:\n", result.stdout)
-    except subprocess.CalledProcessError as e:
-        print(" COMMAND FAILED")
-        print("STDOUT:\n", e.stdout)
-        print("STDERR:\n", e.stderr)
-        raise
-
+    print(f"\n RUNNING: {' '.join(cmd)}")
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+    print("STDOUT:\n", result.stdout)
+    print("STDERR:\n", result.stderr)
+    if result.returncode != 0:
+        raise Exception("Command failed")
 
 def generate_password(length=32):
     chars = string.ascii_letters + string.digits + "!#$^*_-+=?"
     return ''.join(secrets.choice(chars) for _ in range(length))
 
+def validate_iam_role():
+    identity = sts.get_caller_identity()
+    print("STS IDENTITY:\n", json.dumps(identity, indent=2))
+
+    actual_arn = identity["Arn"]
+    if EXPECTED_IAM_ROLE_ARN not in actual_arn:
+        raise Exception(
+            f" WRONG IAM ROLE\nExpected: {EXPECTED_IAM_ROLE_ARN}\nActual: {actual_arn}"
+        )
+
+    print(" IAM ROLE VALIDATION PASSED")
 
 def write_kubeconfig():
-    print("\n Fetching EKS cluster details")
     cluster = eks.describe_cluster(name=EKS_CLUSTER_NAME)["cluster"]
 
-    print("EKS ENDPOINT:", cluster["endpoint"])
-
-    print("\n Generating STS token")
     presigned_url = sts.generate_presigned_url(
         "get_caller_identity",
         Params={},
@@ -98,47 +99,26 @@ current-context: eks
         f.write(kubeconfig)
 
     os.environ["KUBECONFIG"] = "/tmp/kubeconfig"
-
-    print("\n KUBECONFIG written to /tmp/kubeconfig")
-    print("KUBECONFIG EXISTS:", os.path.exists("/tmp/kubeconfig"))
-    print("\n KUBECONFIG (TOKEN REDACTED):")
-    print(kubeconfig.replace(token, "***REDACTED***"))
-
+    print(" kubeconfig written")
 
 # ================= LAMBDA HANDLER =================
 
 def lambda_handler(event, context):
 
-    print("\n================ DEBUG START ================\n")
+    print("\n========= START =========\n")
 
-    #  STEP 1: Confirm Lambda IAM Role
-    identity = sts.get_caller_identity()
-    print("STS IDENTITY:\n", json.dumps(identity, indent=2))
+    #  Step 1: IAM ROLE CHECK (HARDCODED VALIDATION)
+    validate_iam_role()
 
-    #  STEP 2: Confirm EKS access via API
-    eks.describe_cluster(name=EKS_CLUSTER_NAME)
-    print("EKS DescribeCluster: OK")
-
-    #  STEP 3: Write kubeconfig
+    #  Step 2: Write kubeconfig
     write_kubeconfig()
 
-    #  STEP 4: kubectl binary check
-    run([KUBECTL, "version", "--client", "--short"])
-
-    #  STEP 5: API reachability (NO AUTH)
+    #  Step 3: Prove EKS connectivity
     run([KUBECTL, "get", "--raw", "/healthz"])
-
-    #  STEP 6: Authentication check
     run([KUBECTL, "auth", "whoami"])
+    run([KUBECTL, "get", "nodes"])
 
-    #  STEP 7: Full verbose debug
-    run([KUBECTL, "get", "nodes", "-v=9"])
-
-    print("\n================ EKS DEBUG PASSED ================\n")
-
-    # ================= ACTUAL LOGIC =================
-
-    print("\n Rotating Aurora password")
+    #  Step 4: Rotate DB password
     new_password = generate_password()
 
     rds.modify_db_cluster(
@@ -149,7 +129,6 @@ def lambda_handler(event, context):
 
     time.sleep(30)
 
-    print(" Updating SSM parameter")
     ssm.put_parameter(
         Name=SSM_PARAMETER_NAME,
         Value=new_password,
@@ -157,23 +136,22 @@ def lambda_handler(event, context):
         Overwrite=True
     )
 
-    print("⬇ Scaling DOWN deployment")
+    # Step 5: Restart deployment
     run([
         KUBECTL, "scale", "deployment", DEPLOYMENT_NAME,
         "-n", HELM_NAMESPACE,
         "--replicas=0"
     ])
 
-    print("⬆ Scaling UP deployment")
     run([
         KUBECTL, "scale", "deployment", DEPLOYMENT_NAME,
         "-n", HELM_NAMESPACE,
         f"--replicas={REPLICA_COUNT}"
     ])
 
-    print("\n================ SUCCESS ================\n")
+    print("\n========= SUCCESS =========\n")
 
     return {
         "status": "SUCCESS",
-        "message": "EKS connectivity verified, password rotated, deployment restarted"
+        "message": "IAM validated, EKS reachable, password rotated, deployment restarted"
     }
