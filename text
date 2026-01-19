@@ -139,3 +139,14 @@ def lambda_handler(event, context):
         "status": "SUCCESS",
         "message": "Aurora password rotated, SSM updated, Helm upgraded, Nexus IQ restarted"
     }
+
+
+
+
+import os
+
+def lambda_handler(event, context):
+    return {
+        "opt": os.listdir("/opt"),
+        "opt_bin": os.listdir("/opt/bin") if os.path.exists("/opt/bin") else "no /opt/bin"
+    }
