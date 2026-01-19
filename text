@@ -81,25 +81,6 @@ current-context: eks
 
     os.environ["KUBECONFIG"] = "/tmp/kubeconfig"
 
-
-def apply_db_secret(password):
-    """Create or update Kubernetes Secret safely"""
-    p = subprocess.Popen(
-        [
-            KUBECTL, "create", "secret", "generic", "nexus-db-secret",
-            "-n", HELM_NAMESPACE,
-            f"--from-literal=password={password}",
-            "--dry-run=client", "-o", "yaml"
-        ],
-        stdout=subprocess.PIPE
-    )
-
-    subprocess.check_call(
-        [KUBECTL, "apply", "-f", "-"],
-        stdin=p.stdout
-    )
-
-
 def run(cmd):
     subprocess.check_call(cmd)
 
