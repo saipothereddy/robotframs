@@ -29,22 +29,40 @@ KUBECTL = "/opt/bin/kubectl"
 rds = boto3.client("rds", region_name=REGION)
 ssm = boto3.client("ssm", region_name=REGION)
 eks = boto3.client("eks", region_name=REGION)
+sts = boto3.client("sts", region_name=REGION)
 
 # ================= HELPERS =================
 
+def run(cmd):
+    print(f"\n▶ RUNNING: {' '.join(cmd)}")
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+        print("STDOUT:\n", result.stdout)
+    except subprocess.CalledProcessError as e:
+        print(" COMMAND FAILED")
+        print("STDOUT:\n", e.stdout)
+        print("STDERR:\n", e.stderr)
+        raise
+
+
 def generate_password(length=32):
-    """Aurora-safe password"""
     chars = string.ascii_letters + string.digits + "!#$^*_-+=?"
     return ''.join(secrets.choice(chars) for _ in range(length))
 
 
 def write_kubeconfig():
+    print("\n Fetching EKS cluster details")
     cluster = eks.describe_cluster(name=EKS_CLUSTER_NAME)["cluster"]
 
-    endpoint = cluster["endpoint"]
-    ca_data = cluster["certificateAuthority"]["data"]
+    print("EKS ENDPOINT:", cluster["endpoint"])
 
-    sts = boto3.client("sts", region_name=REGION)
+    print("\n Generating STS token")
     presigned_url = sts.generate_presigned_url(
         "get_caller_identity",
         Params={},
@@ -53,8 +71,8 @@ def write_kubeconfig():
     )
 
     token = "k8s-aws-v1." + base64.urlsafe_b64encode(
-        presigned_url.encode("utf-8")
-    ).decode("utf-8").rstrip("=")
+        presigned_url.encode()
+    ).decode().rstrip("=")
 
     kubeconfig = f"""
 apiVersion: v1
@@ -62,8 +80,8 @@ kind: Config
 clusters:
 - name: eks
   cluster:
-    server: {endpoint}
-    certificate-authority-data: {ca_data}
+    server: {cluster["endpoint"]}
+    certificate-authority-data: {cluster["certificateAuthority"]["data"]}
 users:
 - name: eks-user
   user:
@@ -76,37 +94,62 @@ contexts:
 current-context: eks
 """
 
-    # Write kubeconfig
     with open("/tmp/kubeconfig", "w") as f:
         f.write(kubeconfig)
 
     os.environ["KUBECONFIG"] = "/tmp/kubeconfig"
 
-    # 🔐 PRINT KUBECONFIG (TOKEN REDACTED)
-    print("===== GENERATED KUBECONFIG (TOKEN REDACTED) =====")
+    print("\n KUBECONFIG written to /tmp/kubeconfig")
+    print("KUBECONFIG EXISTS:", os.path.exists("/tmp/kubeconfig"))
+    print("\n KUBECONFIG (TOKEN REDACTED):")
     print(kubeconfig.replace(token, "***REDACTED***"))
-    print("===== END KUBECONFIG =====")
-
 
 
 # ================= LAMBDA HANDLER =================
 
 def lambda_handler(event, context):
 
-    # Generate new password
+    print("\n================ DEBUG START ================\n")
+
+    #  STEP 1: Confirm Lambda IAM Role
+    identity = sts.get_caller_identity()
+    print("STS IDENTITY:\n", json.dumps(identity, indent=2))
+
+    #  STEP 2: Confirm EKS access via API
+    eks.describe_cluster(name=EKS_CLUSTER_NAME)
+    print("EKS DescribeCluster: OK")
+
+    #  STEP 3: Write kubeconfig
+    write_kubeconfig()
+
+    #  STEP 4: kubectl binary check
+    run([KUBECTL, "version", "--client", "--short"])
+
+    #  STEP 5: API reachability (NO AUTH)
+    run([KUBECTL, "get", "--raw", "/healthz"])
+
+    #  STEP 6: Authentication check
+    run([KUBECTL, "auth", "whoami"])
+
+    #  STEP 7: Full verbose debug
+    run([KUBECTL, "get", "nodes", "-v=9"])
+
+    print("\n================ EKS DEBUG PASSED ================\n")
+
+    # ================= ACTUAL LOGIC =================
+
+    print("\n Rotating Aurora password")
     new_password = generate_password()
 
-    # Rotate Aurora DB password
     rds.modify_db_cluster(
         DBClusterIdentifier=DB_CLUSTER_ID,
         MasterUserPassword=new_password,
         ApplyImmediately=True
     )
 
-    # Give Aurora time to apply password
     time.sleep(30)
 
-    # Update SSM Parameter
+    print(" Updating SSM parameter")
     ssm.put_parameter(
         Name=SSM_PARAMETER_NAME,
         Value=new_password,
@@ -114,38 +157,23 @@ def lambda_handler(event, context):
         Overwrite=True
     )
 
-    # Prepare kubeconfig
-    write_kubeconfig()
-
-    # Create / update Kubernetes Secret
-    apply_db_secret(new_password)
-
-#    # Helm upgrade (NO PASSWORD INLINE)
-#    run([
-#        HELM, "upgrade", HELM_RELEASE, HELM_CHART,
-#        "-n", HELM_NAMESPACE,
-#        "--reuse-values",
-#        "--set-string", "database.existingSecret=nexus-db-secret"
-#    ])
-
-    # Scale DOWN Nexus IQ
-#    run([
-#        KUBECTL, "scale", "deployment", DEPLOYMENT_NAME,
-#        "-n", HELM_NAMESPACE,
-#        "--replicas=0"
-#    ])
-
-    #  Scale UP Nexus IQ#
-#    run([
-#        KUBECTL, "scale", "deployment", DEPLOYMENT_NAME,
-#        "-n", HELM_NAMESPACE,
-#        f"--replicas={REPLICA_COUNT}"
-#    ])
-
+    print("⬇ Scaling DOWN deployment")
     run([
-        KUBECTL, "get", "nodes"
+        KUBECTL, "scale", "deployment", DEPLOYMENT_NAME,
+        "-n", HELM_NAMESPACE,
+        "--replicas=0"
     ])
+
+    print("⬆ Scaling UP deployment")
+    run([
+        KUBECTL, "scale", "deployment", DEPLOYMENT_NAME,
+        "-n", HELM_NAMESPACE,
+        f"--replicas={REPLICA_COUNT}"
+    ])
+
+    print("\n================ SUCCESS ================\n")
+
     return {
         "status": "SUCCESS",
-        "message": "Aurora password rotated, SSM updated, Helm upgraded, Nexus IQ restarted"
+        "message": "EKS connectivity verified, password rotated, deployment restarted"
     }
