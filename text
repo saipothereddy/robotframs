@@ -8,6 +8,7 @@ import subprocess
 import botocore.session
 from botocore.signers import RequestSigner
 
+
 # ================= ENV =================
 REGION = os.environ["AWS_REGION"]
 
@@ -38,44 +39,22 @@ def generate_password(length=32):
 
 
 def write_kubeconfig():
-    """
-    Generate kubeconfig using boto3 (no aws cli)
-    """
     cluster = eks.describe_cluster(name=EKS_CLUSTER_NAME)["cluster"]
+
     endpoint = cluster["endpoint"]
     ca_data = cluster["certificateAuthority"]["data"]
 
-    # Create STS token (same logic as aws eks get-token)
-    session = botocore.session.get_session()
-    credentials = session.get_credentials().get_frozen_credentials()
+    sts = boto3.client("sts", region_name=REGION)
 
-    signer = RequestSigner(
-        service_id="sts",
-        region_name=REGION,
-        signing_name="sts",
-        signature_version="v4",
-        credentials=credentials,
-        event_emitter=session.events
-    )
-
-    params = {
-        "method": "GET",
-        "url": "https://sts.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15",
-        "body": {},
-        "headers": {
-            "x-k8s-aws-id": EKS_CLUSTER_NAME
-        },
-        "context": {}
-    }
-
-    signed_url = signer.generate_presigned_url(
-        params,
-        region_name=REGION,
-        expires_in=60
+    presigned_url = sts.generate_presigned_url(
+        "get_caller_identity",
+        Params={},
+        ExpiresIn=60,
+        HttpMethod="GET"
     )
 
     token = "k8s-aws-v1." + base64.urlsafe_b64encode(
-        signed_url.encode("utf-8")
+        presigned_url.encode("utf-8")
     ).decode("utf-8").rstrip("=")
 
     kubeconfig = f"""
@@ -102,6 +81,7 @@ current-context: eks
         f.write(kubeconfig)
 
     os.environ["KUBECONFIG"] = "/tmp/kubeconfig"
+
 
 
 def run(cmd):
