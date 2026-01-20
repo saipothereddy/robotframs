@@ -189,3 +189,16 @@ def lambda_handler(event, context):
 
 
 https://sonatype.github.io/helm3-charts
+
+
+
+
+# ---- Helm writable dirs for Lambda ----
+os.environ["HELM_CACHE_HOME"] = "/tmp/helm/cache"
+os.environ["HELM_CONFIG_HOME"] = "/tmp/helm/config"
+os.environ["HELM_DATA_HOME"] = "/tmp/helm/data"
+
+os.makedirs("/tmp/helm/cache", exist_ok=True)
+os.makedirs("/tmp/helm/config", exist_ok=True)
+os.makedirs("/tmp/helm/data", exist_ok=True)
+
