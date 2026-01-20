@@ -173,3 +173,14 @@ def lambda_handler(event, context):
         "status": "SUCCESS",
         "message": "Aurora password rotated, SSM updated, Helm upgraded, deployment restarted"
     }
+
+
+
+    # Helm writable dirs (MANDATORY in Lambda)
+os.environ["HELM_CACHE_HOME"] = "/tmp/helm/cache"
+os.environ["HELM_CONFIG_HOME"] = "/tmp/helm/config"
+os.environ["HELM_DATA_HOME"] = "/tmp/helm/data"
+
+os.makedirs("/tmp/helm/cache", exist_ok=True)
+os.makedirs("/tmp/helm/config", exist_ok=True)
+os.makedirs("/tmp/helm/data", exist_ok=True)
