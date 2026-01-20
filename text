@@ -1,142 +1,142 @@
 import os
-import json
 import boto3
 import base64
 import secrets
 import string
 import subprocess
-import time
-
-# ================= HARDCODED EXPECTATION =================
-# IMPORTANT: Validate by ROLE NAME, not full ARN
-EXPECTED_ROLE_NAME = "aws-cicm-lab-service-role-4"
+import json
+import tempfile
+from botocore.signers import RequestSigner
 
 # ================= ENV =================
 REGION = os.environ["AWS_REGION"]
-EKS_CLUSTER_NAME = os.environ["EKS_CLUSTER_NAME"]
 
 DB_CLUSTER_ID = os.environ["DB_INSTANCE_ID"]
 SSM_PARAMETER_NAME = os.environ["SSM_PARAMETER_NAME"]
+EKS_CLUSTER_NAME = os.environ["EKS_CLUSTER_NAME"]
+
+HELM_RELEASE = os.environ["HELM_RELEASE"]
+HELM_CHART = os.environ["HELM_CHART"]
+HELM_NAMESPACE = os.environ["HELM_NAMESPACE"]
 
 DEPLOYMENT_NAME = os.environ["DEPLOYMENT_NAME"]
-HELM_NAMESPACE = os.environ["HELM_NAMESPACE"]
 REPLICA_COUNT = os.environ["REPLICA_COUNT"]
 
-# ================= BIN PATHS =================
-KUBECTL = "/opt/bin/kubectl"
+# Ensure kubectl / helm from Lambda Layer
+os.environ["PATH"] += ":/opt/bin"
 
 # ================= AWS CLIENTS =================
-eks = boto3.client("eks", region_name=REGION)
-sts = boto3.client("sts", region_name=REGION)
 rds = boto3.client("rds", region_name=REGION)
 ssm = boto3.client("ssm", region_name=REGION)
+eks = boto3.client("eks", region_name=REGION)
+sts = boto3.client("sts", region_name=REGION)
 
 # ================= HELPERS =================
-
-def run(cmd):
-    print(f"\n▶ RUNNING: {' '.join(cmd)}")
-    result = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
-    print("STDOUT:\n", result.stdout)
-    print("STDERR:\n", result.stderr)
-    if result.returncode != 0:
-        raise Exception(" Command failed")
 
 def generate_password(length=32):
     chars = string.ascii_letters + string.digits + "!#$^*_-+=?"
     return ''.join(secrets.choice(chars) for _ in range(length))
 
-def validate_iam_role():
-    """
-    Correct validation for Lambda:
-    Lambda always runs as assumed-role/<ROLE_NAME>/<SESSION>
-    """
-    identity = sts.get_caller_identity()
-    print("STS IDENTITY:\n", json.dumps(identity, indent=2))
 
-    actual_arn = identity["Arn"]
+def get_eks_token(cluster_name):
+    session = boto3.session.Session(region_name=REGION)
+    credentials = session.get_credentials()
 
-    if f"assumed-role/{EXPECTED_ROLE_NAME}/" not in actual_arn:
-        raise Exception(
-            f" WRONG IAM ROLE\n"
-            f"Expected role name: {EXPECTED_ROLE_NAME}\n"
-            f"Actual ARN: {actual_arn}"
-        )
+    sts_client = session.client("sts")
+    service_id = sts_client.meta.service_model.service_id
 
-    print(" IAM ROLE VALIDATION PASSED")
+    signer = RequestSigner(
+        service_id=service_id,
+        region_name=REGION,
+        signing_name="sts",
+        signature_version="v4",
+        credentials=credentials,
+        event_emitter=session.events,
+    )
+
+    request_params = {
+        "method": "GET",
+        "url": f"https://sts.{REGION}.amazonaws.com/"
+               "?Action=GetCallerIdentity&Version=2011-06-15",
+        "body": {},
+        "headers": {
+            "x-k8s-aws-id": cluster_name
+        },
+        "context": {},
+    }
+
+    presigned_url = signer.generate_presigned_url(
+        request_dict=request_params,
+        operation_name="GetCallerIdentity",
+        expires_in=60,
+    )
+
+    token = "k8s-aws-v1." + base64.urlsafe_b64encode(
+        presigned_url.encode("utf-8")
+    ).decode("utf-8").rstrip("=")
+
+    return token
+
 
 def write_kubeconfig():
     cluster = eks.describe_cluster(name=EKS_CLUSTER_NAME)["cluster"]
 
-    presigned_url = sts.generate_presigned_url(
-        "get_caller_identity",
-        Params={},
-        ExpiresIn=60,
-        HttpMethod="GET"
-    )
+    token = get_eks_token(EKS_CLUSTER_NAME)
 
-    token = "k8s-aws-v1." + base64.urlsafe_b64encode(
-        presigned_url.encode()
-    ).decode().rstrip("=")
-
-    kubeconfig = f"""
-apiVersion: v1
-kind: Config
-clusters:
-- name: eks
-  cluster:
-    server: {cluster["endpoint"]}
-    certificate-authority-data: {cluster["certificateAuthority"]["data"]}
-users:
-- name: eks-user
-  user:
-    token: {token}
-contexts:
-- name: eks
-  context:
-    cluster: eks
-    user: eks-user
-current-context: eks
-"""
+    kubeconfig = {
+        "apiVersion": "v1",
+        "kind": "Config",
+        "clusters": [{
+            "name": "eks",
+            "cluster": {
+                "server": cluster["endpoint"],
+                "certificate-authority-data": cluster["certificateAuthority"]["data"]
+            }
+        }],
+        "contexts": [{
+            "name": "eks",
+            "context": {
+                "cluster": "eks",
+                "user": "lambda"
+            }
+        }],
+        "current-context": "eks",
+        "users": [{
+            "name": "lambda",
+            "user": {
+                "token": token
+            }
+        }]
+    }
 
     with open("/tmp/kubeconfig", "w") as f:
-        f.write(kubeconfig)
+        json.dump(kubeconfig, f)
 
     os.environ["KUBECONFIG"] = "/tmp/kubeconfig"
-    print(" kubeconfig written to /tmp/kubeconfig")
+
+
+def run(cmd):
+    subprocess.check_call(cmd)
+
 
 # ================= LAMBDA HANDLER =================
 
 def lambda_handler(event, context):
 
-    print("\n========= START =========\n")
+    
+    print("CALLER IDENTITY:", sts.get_caller_identity())
 
-    #  STEP 1: Validate IAM role (HARDCODED CHECK)
-    validate_iam_role()
-
-    #  STEP 2: Prepare kubeconfig
-    write_kubeconfig()
-
-    #  STEP 3: Prove EKS connectivity
-    run([KUBECTL, "get", "--raw", "/healthz"])
-    run([KUBECTL, "auth", "whoami"])
-    run([KUBECTL, "get", "nodes"])
-
-    #  STEP 4: Rotate DB password
+    # Generate new DB password
     new_password = generate_password()
 
+    # Rotate Aurora password
     rds.modify_db_cluster(
         DBClusterIdentifier=DB_CLUSTER_ID,
         MasterUserPassword=new_password,
         ApplyImmediately=True
     )
 
-    time.sleep(30)
-
+    # Update SSM
     ssm.put_parameter(
         Name=SSM_PARAMETER_NAME,
         Value=new_password,
@@ -144,22 +144,32 @@ def lambda_handler(event, context):
         Overwrite=True
     )
 
-    #  STEP 5: Restart deployment
+    # Prepare kubeconfig (EKS auth)
+    write_kubeconfig()
+
+    # Helm upgrade
     run([
-        KUBECTL, "scale", "deployment", DEPLOYMENT_NAME,
+        "helm", "upgrade", HELM_RELEASE, HELM_CHART,
+        "-n", HELM_NAMESPACE,
+        "--reuse-values",
+        "--set-string", f"database.password={new_password}"
+    ])
+
+    # Scale DOWN deployment
+    run([
+        "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
         "-n", HELM_NAMESPACE,
         "--replicas=0"
     ])
 
+    # Scale UP deployment
     run([
-        KUBECTL, "scale", "deployment", DEPLOYMENT_NAME,
+        "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
         "-n", HELM_NAMESPACE,
         f"--replicas={REPLICA_COUNT}"
     ])
 
-    print("\n========= SUCCESS =========\n")
-
     return {
         "status": "SUCCESS",
-        "message": "IAM validated, EKS reachable, password rotated, deployment restarted"
+        "message": "Aurora password rotated, SSM updated, Helm upgraded, deployment restarted"
     }
