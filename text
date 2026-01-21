@@ -202,3 +202,17 @@ os.makedirs("/tmp/helm/cache", exist_ok=True)
 os.makedirs("/tmp/helm/config", exist_ok=True)
 os.makedirs("/tmp/helm/data", exist_ok=True)
 
+
+
+
+CREATE SCHEMA IF NOT EXISTS insight_brain_ods;
+ALTER SCHEMA insight_brain_ods OWNER TO sonatype;
+
+GRANT ALL PRIVILEGES ON SCHEMA insight_brain_ods TO sonatype;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA insight_brain_ods TO sonatype;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA insight_brain_ods TO sonatype;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA insight_brain_ods
+GRANT ALL ON TABLES TO sonatype
+
+
