@@ -5,12 +5,10 @@ import secrets
 import string
 import subprocess
 import json
-import tempfile
 from botocore.signers import RequestSigner
 
 # ================= ENV =================
 REGION = os.environ["AWS_REGION"]
-
 DB_CLUSTER_ID = os.environ["DB_INSTANCE_ID"]
 SSM_PARAMETER_NAME = os.environ["SSM_PARAMETER_NAME"]
 EKS_CLUSTER_NAME = os.environ["EKS_CLUSTER_NAME"]
@@ -23,10 +21,21 @@ HELM_REPO_NAME = os.environ["HELM_REPO_NAME"]
 HELM_REPO_URL = os.environ["HELM_REPO_URL"]
 
 DEPLOYMENT_NAME = os.environ["DEPLOYMENT_NAME"]
-REPLICA_COUNT = os.environ["REPLICA_COUNT"]
 
-# Ensure kubectl / helm from Lambda Layer
 os.environ["PATH"] += ":/opt/bin"
+
+
+
+# ---- Helm writable dirs for Lambda ----
+os.environ["HELM_CACHE_HOME"] = "/tmp/helm/cache"
+os.environ["HELM_CONFIG_HOME"] = "/tmp/helm/config"
+os.environ["HELM_DATA_HOME"] = "/tmp/helm/data"
+
+os.makedirs("/tmp/helm/cache", exist_ok=True)
+os.makedirs("/tmp/helm/config", exist_ok=True)
+os.makedirs("/tmp/helm/data", exist_ok=True)
+
+
 
 # ================= AWS CLIENTS =================
 rds = boto3.client("rds", region_name=REGION)
@@ -36,9 +45,14 @@ sts = boto3.client("sts", region_name=REGION)
 
 # ================= HELPERS =================
 
+def run(cmd):
+    return subprocess.check_output(cmd).decode("utf-8")
+
+
 def setup_helm_repo():
-    run(["helm", "repo", "add", HELM_REPO_NAME, HELM_REPO_URL])
-    run(["helm", "repo", "update"])
+    subprocess.check_call(["helm", "repo", "add", HELM_REPO_NAME, HELM_REPO_URL])
+    subprocess.check_call(["helm", "repo", "update"])
+
 
 def generate_password(length=32):
     chars = string.ascii_letters + string.digits + "!#$^*_-+=?"
@@ -48,12 +62,10 @@ def generate_password(length=32):
 def get_eks_token(cluster_name):
     session = boto3.session.Session(region_name=REGION)
     credentials = session.get_credentials()
-
     sts_client = session.client("sts")
-    service_id = sts_client.meta.service_model.service_id
 
     signer = RequestSigner(
-        service_id=service_id,
+        service_id=sts_client.meta.service_model.service_id,
         region_name=REGION,
         signing_name="sts",
         signature_version="v4",
@@ -63,12 +75,8 @@ def get_eks_token(cluster_name):
 
     request_params = {
         "method": "GET",
-        "url": f"https://sts.{REGION}.amazonaws.com/"
-               "?Action=GetCallerIdentity&Version=2011-06-15",
-        "body": {},
-        "headers": {
-            "x-k8s-aws-id": cluster_name
-        },
+        "url": f"https://sts.{REGION}.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15",
+        "headers": {"x-k8s-aws-id": cluster_name},
         "context": {},
     }
 
@@ -78,16 +86,13 @@ def get_eks_token(cluster_name):
         expires_in=60,
     )
 
-    token = "k8s-aws-v1." + base64.urlsafe_b64encode(
-        presigned_url.encode("utf-8")
-    ).decode("utf-8").rstrip("=")
-
-    return token
+    return "k8s-aws-v1." + base64.urlsafe_b64encode(
+        presigned_url.encode()
+    ).decode().rstrip("=")
 
 
 def write_kubeconfig():
     cluster = eks.describe_cluster(name=EKS_CLUSTER_NAME)["cluster"]
-
     token = get_eks_token(EKS_CLUSTER_NAME)
 
     kubeconfig = {
@@ -110,9 +115,7 @@ def write_kubeconfig():
         "current-context": "eks",
         "users": [{
             "name": "lambda",
-            "user": {
-                "token": token
-            }
+            "user": {"token": token}
         }]
     }
 
@@ -122,31 +125,48 @@ def write_kubeconfig():
     os.environ["KUBECONFIG"] = "/tmp/kubeconfig"
 
 
-def run(cmd):
-    subprocess.check_call(cmd)
+def find_helm_db_secret():
+    manifest = run([
+        "helm", "get", "manifest", HELM_RELEASE,
+        "-n", HELM_NAMESPACE
+    ])
 
+    secret_name = None
+    secret_key = None
 
+    docs = manifest.split("---")
+    for doc in docs:
+        if "kind: Secret" in doc and "password:" in doc:
+            for line in doc.splitlines():
+                if line.strip().startswith("name:"):
+                    secret_name = line.split(":")[1].strip()
+                if line.strip().startswith("password:"):
+                    secret_key = "password"
+            break
 
+    if not secret_name:
+        raise Exception("DB Secret not found in Helm manifest")
+
+    return secret_name, secret_key
 
 
 # ================= LAMBDA HANDLER =================
 
 def lambda_handler(event, context):
 
-    
-    print("CALLER IDENTITY:", sts.get_caller_identity())
+    print("CALLER:", sts.get_caller_identity())
 
-    # Generate new DB password
+    # Generate password
     new_password = generate_password()
 
-    # Rotate Aurora password
+    # Rotate Aurora
     rds.modify_db_cluster(
         DBClusterIdentifier=DB_CLUSTER_ID,
         MasterUserPassword=new_password,
         ApplyImmediately=True
     )
 
-    # Update SSM
+    #  Update SSM
     ssm.put_parameter(
         Name=SSM_PARAMETER_NAME,
         Value=new_password,
@@ -154,65 +174,39 @@ def lambda_handler(event, context):
         Overwrite=True
     )
 
-    # Prepare kubeconfig (EKS auth)
+    # Kube access
     write_kubeconfig()
-
     setup_helm_repo()
 
-    # Helm upgrade
-    run([
+    # Auto-detect Helm Secret
+    secret_name, secret_key = find_helm_db_secret()
+    print(f"Detected Secret: {secret_name}, key: {secret_key}")
+
+    encoded_pw = base64.b64encode(new_password.encode()).decode()
+
+    # Patch Secret
+    subprocess.check_call([
+        "kubectl", "patch", "secret", secret_name,
+        "-n", HELM_NAMESPACE,
+        "--type=json",
+        "-p", f'[{{"op":"replace","path":"/data/{secret_key}","value":"{encoded_pw}"}}]'
+    ])
+
+    # Helm upgrade (non-secret only)
+    subprocess.check_call([
         "helm", "upgrade", HELM_RELEASE, HELM_CHART,
         "-n", HELM_NAMESPACE,
-        "--reuse-values",
-        "--set-string", f"database.password={new_password}"
+        "--reuse-values"
     ])
 
-    # Scale DOWN deployment
-    run([
-        "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
-        "-n", HELM_NAMESPACE,
-        "--replicas=0"
-    ])
-
-    # Scale UP deployment
-    run([
-        "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
-        "-n", HELM_NAMESPACE,
-        f"--replicas={REPLICA_COUNT}"
+    #  Restart app
+    subprocess.check_call([
+        "kubectl", "rollout", "restart",
+        "deployment", DEPLOYMENT_NAME,
+        "-n", HELM_NAMESPACE
     ])
 
     return {
         "status": "SUCCESS",
-        "message": "Aurora password rotated, SSM updated, Helm upgraded, deployment restarted"
+        "message": f"Password rotated and secret {secret_name} updated"
     }
-
-
-
-https://sonatype.github.io/helm3-charts
-
-
-
-
-# ---- Helm writable dirs for Lambda ----
-os.environ["HELM_CACHE_HOME"] = "/tmp/helm/cache"
-os.environ["HELM_CONFIG_HOME"] = "/tmp/helm/config"
-os.environ["HELM_DATA_HOME"] = "/tmp/helm/data"
-
-os.makedirs("/tmp/helm/cache", exist_ok=True)
-os.makedirs("/tmp/helm/config", exist_ok=True)
-os.makedirs("/tmp/helm/data", exist_ok=True)
-
-
-
-
-CREATE SCHEMA IF NOT EXISTS insight_brain_ods;
-ALTER SCHEMA insight_brain_ods OWNER TO sonatype;
-
-GRANT ALL PRIVILEGES ON SCHEMA insight_brain_ods TO sonatype;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA insight_brain_ods TO sonatype;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA insight_brain_ods TO sonatype;
-
-ALTER DEFAULT PRIVILEGES IN SCHEMA insight_brain_ods
-GRANT ALL ON TABLES TO sonatype
-
-
