@@ -6,6 +6,7 @@ import string
 import subprocess
 import json
 import yaml
+import time
 from botocore.signers import RequestSigner
 
 # ================= ENV =================
@@ -22,6 +23,7 @@ HELM_REPO_NAME = os.environ["HELM_REPO_NAME"]
 HELM_REPO_URL = os.environ["HELM_REPO_URL"]
 
 DEPLOYMENT_NAME = os.environ["DEPLOYMENT_NAME"]
+REPLICA_COUNT = os.environ["REPLICA_COUNT"]
 
 # Ensure kubectl / helm from Lambda Layer
 os.environ["PATH"] += ":/opt/bin"
@@ -154,11 +156,38 @@ def find_helm_db_secret():
     raise Exception("Helm DB password secret not found")
 
 
+
+def wait_until_rds_available():
+    print("Waiting for RDS cluster to become available...")
+
+    while True:
+        response = rds.describe_db_clusters(
+            DBClusterIdentifier=DB_CLUSTER_ID
+        )
+
+        status = response["DBClusters"][0]["Status"]
+        print(f"RDS current status: {status}")
+
+        if status == "available":
+            print("RDS is now AVAILABLE")
+            break
+
+        time.sleep(20) 
+
+
 # ================= LAMBDA HANDLER =================
 
 def lambda_handler(event, context):
 
     print("CALLER:", sts.get_caller_identity())
+    write_kubeconfig()
+    
+    # Scale DOWN deployment
+    run([
+        "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
+        "-n", HELM_NAMESPACE,
+        "--replicas=0"
+    ])
 
     #  Generate new DB password
     new_password = generate_password()
@@ -169,6 +198,8 @@ def lambda_handler(event, context):
         MasterUserPassword=new_password,
         ApplyImmediately=True
     )
+
+    wait_until_rds_available()
 
     #  Update SSM
     ssm.put_parameter(
@@ -204,10 +235,11 @@ def lambda_handler(event, context):
     ])
 
     # Restart application
-    subprocess.check_call([
-        "kubectl", "rollout", "restart",
-        "deployment", DEPLOYMENT_NAME,
-        "-n", HELM_NAMESPACE
+    # Scale UP deployment
+    run([
+        "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
+        "-n", HELM_NAMESPACE,
+        f"--replicas={REPLICA_COUNT}"
     ])
 
     return {
