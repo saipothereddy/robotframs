@@ -210,3 +210,7 @@ def lambda_handler(event, context):
         "status": "SUCCESS",
         "message": f"Password rotated and secret {secret_name} updated"
     }
+
+
+
+    kubectl patch secret <helm-created-secret> -n <namespace> --type='json' -p='[{"op":"replace","path":"/data/password","value":"'$(echo -n NEW_PASSWORD | base64)'"}]'
