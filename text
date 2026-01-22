@@ -131,23 +131,40 @@ def find_helm_db_secret():
         "-n", HELM_NAMESPACE
     ])
 
-    secret_name = None
-    secret_key = None
-
     docs = manifest.split("---")
+
     for doc in docs:
-        if "kind: Secret" in doc and "password:" in doc:
-            for line in doc.splitlines():
-                if line.strip().startswith("name:"):
-                    secret_name = line.split(":")[1].strip()
-                if line.strip().startswith("password:"):
-                    secret_key = "password"
-            break
+        if "kind: Secret" not in doc:
+            continue
 
-    if not secret_name:
-        raise Exception("DB Secret not found in Helm manifest")
+        # Ensure Secret belongs to THIS Helm release
+        if f"meta.helm.sh/release-name: {HELM_RELEASE}" not in doc:
+            continue
 
-    return secret_name, secret_key
+        if f"meta.helm.sh/release-namespace: {HELM_NAMESPACE}" not in doc:
+            continue
+
+        secret_name = None
+        secret_key = None
+
+        for line in doc.splitlines():
+            line = line.strip()
+
+            if line.startswith("name:"):
+                secret_name = line.split(":", 1)[1].strip()
+
+            if line.startswith("password:"):
+                secret_key = "password"
+            elif line.startswith("postgres-password:"):
+                secret_key = "postgres-password"
+
+        # STRICT filter: must be DB password secret
+        if secret_name and secret_key:
+            if "database" in secret_name and "password" in secret_name:
+                return secret_name, secret_key
+
+    raise Exception("Helm DB password secret not found")
+
 
 
 # ================= LAMBDA HANDLER =================
@@ -213,4 +230,4 @@ def lambda_handler(event, context):
 
 
 
-    kubectl patch secret <helm-created-secret> -n <namespace> --type='json' -p='[{"op":"replace","path":"/data/password","value":"'$(echo -n NEW_PASSWORD | base64)'"}]'
+kubectl get secret nexus-iq-iq-server-database-password-secret -n lifecycle -o jsonpath='{.data.password}' | base64 --decode
