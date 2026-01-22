@@ -5,6 +5,7 @@ import secrets
 import string
 import subprocess
 import json
+import yaml
 from botocore.signers import RequestSigner
 
 # ================= ENV =================
@@ -22,9 +23,8 @@ HELM_REPO_URL = os.environ["HELM_REPO_URL"]
 
 DEPLOYMENT_NAME = os.environ["DEPLOYMENT_NAME"]
 
+# Ensure kubectl / helm from Lambda Layer
 os.environ["PATH"] += ":/opt/bin"
-
-
 
 # ---- Helm writable dirs for Lambda ----
 os.environ["HELM_CACHE_HOME"] = "/tmp/helm/cache"
@@ -34,8 +34,6 @@ os.environ["HELM_DATA_HOME"] = "/tmp/helm/data"
 os.makedirs("/tmp/helm/cache", exist_ok=True)
 os.makedirs("/tmp/helm/config", exist_ok=True)
 os.makedirs("/tmp/helm/data", exist_ok=True)
-
-
 
 # ================= AWS CLIENTS =================
 rds = boto3.client("rds", region_name=REGION)
@@ -76,6 +74,7 @@ def get_eks_token(cluster_name):
     request_params = {
         "method": "GET",
         "url": f"https://sts.{REGION}.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15",
+        "body": {},
         "headers": {"x-k8s-aws-id": cluster_name},
         "context": {},
     }
@@ -125,46 +124,34 @@ def write_kubeconfig():
     os.environ["KUBECONFIG"] = "/tmp/kubeconfig"
 
 
+# ================= HELM SECRET DISCOVERY =================
+
 def find_helm_db_secret():
     manifest = run([
         "helm", "get", "manifest", HELM_RELEASE,
         "-n", HELM_NAMESPACE
     ])
 
-    docs = manifest.split("---")
-
-    for doc in docs:
-        if "kind: Secret" not in doc:
+    for doc in yaml.safe_load_all(manifest):
+        if not doc:
             continue
 
-        # Ensure Secret belongs to THIS Helm release
-        if f"meta.helm.sh/release-name: {HELM_RELEASE}" not in doc:
+        if doc.get("kind") != "Secret":
             continue
 
-        if f"meta.helm.sh/release-namespace: {HELM_NAMESPACE}" not in doc:
-            continue
+        metadata = doc.get("metadata", {})
+        name = metadata.get("name", "")
+        data = doc.get("data", {})
 
-        secret_name = None
-        secret_key = None
+        # Nexus IQ DB password secret (chart contract)
+        if "database-password" in name and "password" in data:
+            return name, "password"
 
-        for line in doc.splitlines():
-            line = line.strip()
-
-            if line.startswith("name:"):
-                secret_name = line.split(":", 1)[1].strip()
-
-            if line.startswith("password:"):
-                secret_key = "password"
-            elif line.startswith("postgres-password:"):
-                secret_key = "postgres-password"
-
-        # STRICT filter: must be DB password secret
-        if secret_name and secret_key:
-            if "database" in secret_name and "password" in secret_name:
-                return secret_name, secret_key
+        # Fallback (postgres-style)
+        if "database-password" in name and "postgres-password" in data:
+            return name, "postgres-password"
 
     raise Exception("Helm DB password secret not found")
-
 
 
 # ================= LAMBDA HANDLER =================
@@ -173,10 +160,10 @@ def lambda_handler(event, context):
 
     print("CALLER:", sts.get_caller_identity())
 
-    # Generate password
+    #  Generate new DB password
     new_password = generate_password()
 
-    # Rotate Aurora
+    #  Rotate Aurora password
     rds.modify_db_cluster(
         DBClusterIdentifier=DB_CLUSTER_ID,
         MasterUserPassword=new_password,
@@ -191,13 +178,13 @@ def lambda_handler(event, context):
         Overwrite=True
     )
 
-    # Kube access
+    #  Kubernetes access
     write_kubeconfig()
     setup_helm_repo()
 
-    # Auto-detect Helm Secret
+    # Detect Helm DB Secret
     secret_name, secret_key = find_helm_db_secret()
-    print(f"Detected Secret: {secret_name}, key: {secret_key}")
+    print(f"Detected Helm DB Secret: {secret_name}, key: {secret_key}")
 
     encoded_pw = base64.b64encode(new_password.encode()).decode()
 
@@ -209,14 +196,14 @@ def lambda_handler(event, context):
         "-p", f'[{{"op":"replace","path":"/data/{secret_key}","value":"{encoded_pw}"}}]'
     ])
 
-    # Helm upgrade (non-secret only)
+    # Helm upgrade (non-secret changes only)
     subprocess.check_call([
         "helm", "upgrade", HELM_RELEASE, HELM_CHART,
         "-n", HELM_NAMESPACE,
         "--reuse-values"
     ])
 
-    #  Restart app
+    # Restart application
     subprocess.check_call([
         "kubectl", "rollout", "restart",
         "deployment", DEPLOYMENT_NAME,
@@ -227,7 +214,3 @@ def lambda_handler(event, context):
         "status": "SUCCESS",
         "message": f"Password rotated and secret {secret_name} updated"
     }
-
-
-
-kubectl get secret nexus-iq-iq-server-database-password-secret -n lifecycle -o jsonpath='{.data.password}' | base64 --decode
