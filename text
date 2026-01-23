@@ -5,32 +5,35 @@ import secrets
 import string
 import subprocess
 import json
-import tempfile
-from botocore.signers import RequestSigner
 import time
+from botocore.signers import RequestSigner
 
 # ================= ENV =================
 REGION = os.environ["AWS_REGION"]
-
-DB_CLUSTER_ID = os.environ["DB_INSTANCE_ID"]
-SSM_PARAMETER_NAME = os.environ["SSM_PARAMETER_NAME"]
 EKS_CLUSTER_NAME = os.environ["EKS_CLUSTER_NAME"]
 
+# BLUE (mandatory)
+BLUE_DB_CLUSTER_ID = os.environ["BLUE_DB_CLUSTER_ID"]
+BLUE_SSM_PARAMETER = os.environ["BLUE_SSM_PARAMETER_NAME"]
+BLUE_NAMESPACE = os.environ["BLUE_NAMESPACE"]
+
+# GREEN (optional)
+GREEN_DB_CLUSTER_ID = os.environ.get("GREEN_DB_CLUSTER_ID")
+GREEN_SSM_PARAMETER = os.environ.get("GREEN_SSM_PARAMETER_NAME")
+GREEN_NAMESPACE = os.environ.get("GREEN_NAMESPACE")
+
+# Helm / K8s
 HELM_RELEASE = os.environ["HELM_RELEASE"]
 HELM_CHART = os.environ["HELM_CHART"]
-HELM_NAMESPACE = os.environ["HELM_NAMESPACE"]
-
 HELM_REPO_NAME = os.environ["HELM_REPO_NAME"]
 HELM_REPO_URL = os.environ["HELM_REPO_URL"]
-
 DEPLOYMENT_NAME = os.environ["DEPLOYMENT_NAME"]
 REPLICA_COUNT = os.environ["REPLICA_COUNT"]
 
-# Ensure kubectl / helm from Lambda Layer
+# Ensure kubectl / helm
 os.environ["PATH"] += ":/opt/bin"
 
-
-# ---- Helm writable dirs for Lambda ----
+# Helm writable dirs
 os.environ["HELM_CACHE_HOME"] = "/tmp/helm/cache"
 os.environ["HELM_CONFIG_HOME"] = "/tmp/helm/config"
 os.environ["HELM_DATA_HOME"] = "/tmp/helm/data"
@@ -47,21 +50,37 @@ sts = boto3.client("sts", region_name=REGION)
 
 # ================= HELPERS =================
 
-def setup_helm_repo():
-    run(["helm", "repo", "add", HELM_REPO_NAME, HELM_REPO_URL])
-    run(["helm", "repo", "update"])
+def run(cmd):
+    subprocess.check_call(cmd)
 
 def generate_password(length=32):
     chars = string.ascii_letters + string.digits + "!#$^*_-+=?"
     return ''.join(secrets.choice(chars) for _ in range(length))
 
+def setup_helm_repo():
+    run(["helm", "repo", "add", HELM_REPO_NAME, HELM_REPO_URL])
+    run(["helm", "repo", "update"])
+
+def namespace_exists(namespace):
+    return subprocess.call(
+        ["kubectl", "get", "namespace", namespace],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    ) == 0
+
+def wait_until_rds_available(cluster_id):
+    while True:
+        status = rds.describe_db_clusters(
+            DBClusterIdentifier=cluster_id
+        )["DBClusters"][0]["Status"]
+        if status == "available":
+            break
+        time.sleep(20)
 
 def get_eks_token(cluster_name):
     session = boto3.session.Session(region_name=REGION)
     credentials = session.get_credentials()
-
     sts_client = session.client("sts")
-        
 
     signer = RequestSigner(
         service_id=sts_client.meta.service_model.service_id,
@@ -72,33 +91,25 @@ def get_eks_token(cluster_name):
         event_emitter=session.events,
     )
 
-    request_params = {
-        "method": "GET",
-        "url": f"https://sts.{REGION}.amazonaws.com/"
-               "?Action=GetCallerIdentity&Version=2011-06-15",
-        "body": {},
-        "headers": {
-            "x-k8s-aws-id": cluster_name
-        },
-        "context": {},
-    }
-
     presigned_url = signer.generate_presigned_url(
-        request_dict=request_params,
+        request_dict={
+            "method": "GET",
+            "url": f"https://sts.{REGION}.amazonaws.com/"
+                   "?Action=GetCallerIdentity&Version=2011-06-15",
+            "body": {},
+            "headers": {"x-k8s-aws-id": cluster_name},
+            "context": {},
+        },
         operation_name="GetCallerIdentity",
         expires_in=60,
     )
 
-    token = "k8s-aws-v1." + base64.urlsafe_b64encode(
-        presigned_url.encode("utf-8")
-    ).decode("utf-8").rstrip("=")
-
-    return token
-
+    return "k8s-aws-v1." + base64.urlsafe_b64encode(
+        presigned_url.encode()
+    ).decode().rstrip("=")
 
 def write_kubeconfig():
     cluster = eks.describe_cluster(name=EKS_CLUSTER_NAME)["cluster"]
-
     token = get_eks_token(EKS_CLUSTER_NAME)
 
     kubeconfig = {
@@ -113,17 +124,12 @@ def write_kubeconfig():
         }],
         "contexts": [{
             "name": "eks",
-            "context": {
-                "cluster": "eks",
-                "user": "lambda"
-            }
+            "context": {"cluster": "eks", "user": "lambda"}
         }],
         "current-context": "eks",
         "users": [{
             "name": "lambda",
-            "user": {
-                "token": token
-            }
+            "user": {"token": token}
         }]
     }
 
@@ -132,85 +138,80 @@ def write_kubeconfig():
 
     os.environ["KUBECONFIG"] = "/tmp/kubeconfig"
 
-
-def run(cmd):
-    subprocess.check_call(cmd)
-
-
-def wait_until_rds_available():
-    print("Waiting for RDS cluster to become available...")
-
-    while True:
-        response = rds.describe_db_clusters(
-            DBClusterIdentifier=DB_CLUSTER_ID
-        )
-
-        status = response["DBClusters"][0]["Status"]
-        print(f"RDS current status: {status}")
-
-        if status == "available":
-            print("RDS is now AVAILABLE")
-            break
-
-        time.sleep(20) 
-
-
-# ================= LAMBDA HANDLER =================
-
-def lambda_handler(event, context):
-    
-    print("CALLER IDENTITY:", sts.get_caller_identity())
-
-    # Prepare kubeconfig (EKS auth)
-    write_kubeconfig()
-    
-    # Scale DOWN deployment
+def process_env(name, db_cluster, ssm_param, namespace):
+    print(f"===== Processing {name} =====")
+    # Scale DOWN
     run([
         "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
-        "-n", HELM_NAMESPACE,
+        "-n", namespace,
         "--replicas=0"
     ])
 
+    password = generate_password()
 
-    # Generate new DB password
-    new_password = generate_password()
-
-    # Rotate Aurora password
+    # Rotate RDS
     rds.modify_db_cluster(
-        DBClusterIdentifier=DB_CLUSTER_ID,
-        MasterUserPassword=new_password,
-        ApplyImmediately=True     
+        DBClusterIdentifier=db_cluster,
+        MasterUserPassword=password,
+        ApplyImmediately=True
     )
-
-    wait_until_rds_available()
+    wait_until_rds_available(db_cluster)
 
     # Update SSM
     ssm.put_parameter(
-        Name=SSM_PARAMETER_NAME,
-        Value=new_password,
+        Name=ssm_param,
+        Value=password,
         Type="SecureString",
         Overwrite=True
     )
 
-
-    setup_helm_repo()
-
     # Helm upgrade
     run([
-        "helm", "upgrade", HELM_RELEASE, HELM_CHART,
-        "-n", HELM_NAMESPACE,
+        "helm", "upgrade",
+        HELM_RELEASE, HELM_CHART,
+        "-n", namespace,
         "--reuse-values",
-        "--set", "iq_server.database.password={new_password}"
+        "--set-string", f"iq_server.database.password={password}"
     ])
 
-    # Scale UP deployment
+    # Scale UP
     run([
         "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
-        "-n", HELM_NAMESPACE,
+        "-n", namespace,
         f"--replicas={REPLICA_COUNT}"
     ])
 
+    print(f"{name} completed successfully")
+
+# ================= LAMBDA HANDLER =================
+
+def lambda_handler(event, context):
+
+    print("CALLER:", sts.get_caller_identity())
+
+    write_kubeconfig()
+    setup_helm_repo()
+
+    #  BLUE (ALWAYS)
+    process_env(
+        name="BLUE",
+        db_cluster=BLUE_DB_CLUSTER_ID,
+        ssm_param=BLUE_SSM_PARAMETER,
+        namespace=BLUE_NAMESPACE
+    )
+
+    #  GREEN (OPTIONAL)
+    if GREEN_NAMESPACE and namespace_exists(GREEN_NAMESPACE):
+        process_env(
+            name="GREEN",
+            db_cluster=GREEN_DB_CLUSTER_ID,
+            ssm_param=GREEN_SSM_PARAMETER,
+            namespace=GREEN_NAMESPACE
+        )
+    else:
+        print("GREEN namespace not present — skipping GREEN")
+
     return {
         "status": "SUCCESS",
-        "message": "Aurora password rotated, SSM updated, Helm upgraded, deployment restarted"
+        "message": "Scale-down/upgrade/scale-up completed for BLUE and optional GREEN"
     }
