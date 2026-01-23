@@ -5,12 +5,13 @@ import secrets
 import string
 import subprocess
 import json
-import yaml
-import time
+import tempfile
 from botocore.signers import RequestSigner
+import time
 
 # ================= ENV =================
 REGION = os.environ["AWS_REGION"]
+
 DB_CLUSTER_ID = os.environ["DB_INSTANCE_ID"]
 SSM_PARAMETER_NAME = os.environ["SSM_PARAMETER_NAME"]
 EKS_CLUSTER_NAME = os.environ["EKS_CLUSTER_NAME"]
@@ -27,6 +28,7 @@ REPLICA_COUNT = os.environ["REPLICA_COUNT"]
 
 # Ensure kubectl / helm from Lambda Layer
 os.environ["PATH"] += ":/opt/bin"
+
 
 # ---- Helm writable dirs for Lambda ----
 os.environ["HELM_CACHE_HOME"] = "/tmp/helm/cache"
@@ -45,14 +47,9 @@ sts = boto3.client("sts", region_name=REGION)
 
 # ================= HELPERS =================
 
-def run(cmd):
-    return subprocess.check_output(cmd).decode("utf-8")
-
-
 def setup_helm_repo():
-    subprocess.check_call(["helm", "repo", "add", HELM_REPO_NAME, HELM_REPO_URL])
-    subprocess.check_call(["helm", "repo", "update"])
-
+    run(["helm", "repo", "add", HELM_REPO_NAME, HELM_REPO_URL])
+    run(["helm", "repo", "update"])
 
 def generate_password(length=32):
     chars = string.ascii_letters + string.digits + "!#$^*_-+=?"
@@ -62,10 +59,12 @@ def generate_password(length=32):
 def get_eks_token(cluster_name):
     session = boto3.session.Session(region_name=REGION)
     credentials = session.get_credentials()
+
     sts_client = session.client("sts")
+        
 
     signer = RequestSigner(
-        service_id=sts_client.meta.service_model.service_id,
+        service_id=service_id,
         region_name=REGION,
         signing_name="sts",
         signature_version="v4",
@@ -75,9 +74,12 @@ def get_eks_token(cluster_name):
 
     request_params = {
         "method": "GET",
-        "url": f"https://sts.{REGION}.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15",
+        "url": f"https://sts.{REGION}.amazonaws.com/"
+               "?Action=GetCallerIdentity&Version=2011-06-15",
         "body": {},
-        "headers": {"x-k8s-aws-id": cluster_name},
+        "headers": {
+            "x-k8s-aws-id": cluster_name
+        },
         "context": {},
     }
 
@@ -87,13 +89,16 @@ def get_eks_token(cluster_name):
         expires_in=60,
     )
 
-    return "k8s-aws-v1." + base64.urlsafe_b64encode(
-        presigned_url.encode()
-    ).decode().rstrip("=")
+    token = "k8s-aws-v1." + base64.urlsafe_b64encode(
+        presigned_url.encode("utf-8")
+    ).decode("utf-8").rstrip("=")
+
+    return token
 
 
 def write_kubeconfig():
     cluster = eks.describe_cluster(name=EKS_CLUSTER_NAME)["cluster"]
+
     token = get_eks_token(EKS_CLUSTER_NAME)
 
     kubeconfig = {
@@ -116,7 +121,9 @@ def write_kubeconfig():
         "current-context": "eks",
         "users": [{
             "name": "lambda",
-            "user": {"token": token}
+            "user": {
+                "token": token
+            }
         }]
     }
 
@@ -126,35 +133,8 @@ def write_kubeconfig():
     os.environ["KUBECONFIG"] = "/tmp/kubeconfig"
 
 
-# ================= HELM SECRET DISCOVERY =================
-
-def find_helm_db_secret():
-    manifest = run([
-        "helm", "get", "manifest", HELM_RELEASE,
-        "-n", HELM_NAMESPACE
-    ])
-
-    for doc in yaml.safe_load_all(manifest):
-        if not doc:
-            continue
-
-        if doc.get("kind") != "Secret":
-            continue
-
-        metadata = doc.get("metadata", {})
-        name = metadata.get("name", "")
-        data = doc.get("data", {})
-
-        # Nexus IQ DB password secret (chart contract)
-        if "database-password" in name and "password" in data:
-            return name, "password"
-
-        # Fallback (postgres-style)
-        if "database-password" in name and "postgres-password" in data:
-            return name, "postgres-password"
-
-    raise Exception("Helm DB password secret not found")
-
+def run(cmd):
+    subprocess.check_call(cmd)
 
 
 def wait_until_rds_available():
@@ -178,8 +158,10 @@ def wait_until_rds_available():
 # ================= LAMBDA HANDLER =================
 
 def lambda_handler(event, context):
+    
+    print("CALLER IDENTITY:", sts.get_caller_identity())
 
-    print("CALLER:", sts.get_caller_identity())
+    # Prepare kubeconfig (EKS auth)
     write_kubeconfig()
     
     # Scale DOWN deployment
@@ -189,19 +171,20 @@ def lambda_handler(event, context):
         "--replicas=0"
     ])
 
-    #  Generate new DB password
+
+    # Generate new DB password
     new_password = generate_password()
 
-    #  Rotate Aurora password
+    # Rotate Aurora password
     rds.modify_db_cluster(
         DBClusterIdentifier=DB_CLUSTER_ID,
         MasterUserPassword=new_password,
-        ApplyImmediately=True
+        ApplyImmediately=True     
     )
 
     wait_until_rds_available()
 
-    #  Update SSM
+    # Update SSM
     ssm.put_parameter(
         Name=SSM_PARAMETER_NAME,
         Value=new_password,
@@ -209,32 +192,17 @@ def lambda_handler(event, context):
         Overwrite=True
     )
 
-    #  Kubernetes access
-    write_kubeconfig()
+
     setup_helm_repo()
 
-    # Detect Helm DB Secret
-    secret_name, secret_key = find_helm_db_secret()
-    print(f"Detected Helm DB Secret: {secret_name}, key: {secret_key}")
-
-    encoded_pw = base64.b64encode(new_password.encode()).decode()
-
-    # Patch Secret
-    subprocess.check_call([
-        "kubectl", "patch", "secret", secret_name,
-        "-n", HELM_NAMESPACE,
-        "--type=json",
-        "-p", f'[{{"op":"replace","path":"/data/{secret_key}","value":"{encoded_pw}"}}]'
-    ])
-
-    # Helm upgrade (non-secret changes only)
-    subprocess.check_call([
+    # Helm upgrade
+    run([
         "helm", "upgrade", HELM_RELEASE, HELM_CHART,
         "-n", HELM_NAMESPACE,
-        "--reuse-values"
+        "--reuse-values",
+        "--set", "iq_server.database.password={new_password}"
     ])
 
-    # Restart application
     # Scale UP deployment
     run([
         "kubectl", "scale", "deployment", DEPLOYMENT_NAME,
@@ -244,5 +212,5 @@ def lambda_handler(event, context):
 
     return {
         "status": "SUCCESS",
-        "message": f"Password rotated and secret {secret_name} updated"
+        "message": "Aurora password rotated, SSM updated, Helm upgraded, deployment restarted"
     }
