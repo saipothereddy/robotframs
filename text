@@ -212,10 +212,16 @@ def lambda_handler(event, context):
             ssm_param=GREEN_SSM_PARAMETER,
             namespace=GREEN_NAMESPACE
         )
+        updated_envs.append("GREEN")
     else:
         print("GREEN namespace not present — skipping GREEN")
 
     return {
         "status": "SUCCESS",
         "message": "Scale-down/upgrade/scale-up completed for BLUE and optional GREEN"
+    }
+    return {
+        "status": "SUCCESS",
+        "updated_environments": updated_envs
+         "message": "Successfully updated new password for environments"
     }
