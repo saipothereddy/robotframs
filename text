@@ -191,14 +191,18 @@ def lambda_handler(event, context):
 
     write_kubeconfig()
     setup_helm_repo()
-
-    #  BLUE (ALWAYS)
-    process_env(
-        name="BLUE",
-        db_cluster=BLUE_DB_CLUSTER_ID,
-        ssm_param=BLUE_SSM_PARAMETER,
-        namespace=BLUE_NAMESPACE
-    )
+    
+    #  Blue (live)
+    if BLUE_NAMESPACE and namespace_exists(BLUE_NAMESPACE):
+        process_env(
+            name="BLUE",
+            db_cluster=BLUE_DB_CLUSTER_ID,
+            ssm_param=BLUE_SSM_PARAMETER,
+            namespace=BLUE_NAMESPACE
+        )
+        updated_envs.append("BLUE")
+    else:
+        print("BLUE namespace not present — skipping BLUE")
 
     #  GREEN (OPTIONAL)
     if GREEN_NAMESPACE and namespace_exists(GREEN_NAMESPACE):
