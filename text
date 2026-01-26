@@ -216,12 +216,17 @@ def lambda_handler(event, context):
     else:
         print("GREEN namespace not present — skipping GREEN")
 
+    if updated_envs:
+        message = (
+            "Successfully updated new password for "
+            + " and ".join(updated_envs)
+            + " environment(s)."
+        )
+    else:
+        message = "No environments were updated."
+        
     return {
         "status": "SUCCESS",
-        "message": "Scale-down/upgrade/scale-up completed for BLUE and optional GREEN"
-    }
-    return {
-        "status": "SUCCESS",
-        "updated_environments": updated_envs
-         "message": "Successfully updated new password for environments"
+        "updated_environments": updated_envs,
+        "message": message
     }
