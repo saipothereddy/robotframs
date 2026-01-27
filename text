@@ -191,6 +191,9 @@ def lambda_handler(event, context):
 
     write_kubeconfig()
     setup_helm_repo()
+
+
+     updated_envs = []
     
     #  Blue (live)
     if BLUE_NAMESPACE and namespace_exists(BLUE_NAMESPACE):
