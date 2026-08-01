@@ -17,11 +17,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
     environment:
       name: test
 
-
     steps:
-      - name: Print Variable
+      - name: Print Secret
         run: |
-          echo "${{ vars.TEST }}"
+          echo "${{ secrets.TEST_SECRET }}"
