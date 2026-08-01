@@ -18,11 +18,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
-    environment: test
+    environment:
+      name: test
 
     steps:
-      - run: echo "Secret=${{ secrets.ENV_FILE }}"
-
-      - name: Print Environment
+      - name: Check Secret
         run: |
-         echo "Environment = ${{ job.environment.name }}"
+          if [ -z "${{ secrets.ENV_FILE }}" ]; then
+            echo "❌ Secret is EMPTY"
+            exit 1
+          else
+            echo "✅ Secret exists"
+          fi
