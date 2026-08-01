@@ -20,9 +20,8 @@ jobs:
     environment:
       name: test
 
-    steps:
-      - run: echo "${{ vars.TEST_SECRET }}"
 
+    steps:
       - name: Print Variable
         run: |
-         echo "TEST_SECRET=${{ vars.TEST_SECRET }}"
+          echo "${{ vars.TEST }}"
