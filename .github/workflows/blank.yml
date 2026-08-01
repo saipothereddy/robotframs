@@ -23,6 +23,6 @@ jobs:
     steps:
       - run: echo "${{ vars.TEST_SECRET }}"
 
-      - name: Create .env
+      - name: Print Variable
         run: |
-         printf "%s" "${{ vars.ENV_FILE }}" > .env
+         echo "TEST_SECRET=${{ vars.TEST_SECRET }}"
