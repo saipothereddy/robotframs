@@ -22,3 +22,7 @@ jobs:
 
     steps:
       - run: echo "Secret=${{ secrets.ENV_FILE }}"
+
+      - name: Print Environment
+        run: |
+         echo "Environment = ${{ job.environment.name }}"
