@@ -21,4 +21,4 @@ jobs:
       name: test
 
     steps:
-      - run: echo "${{ secrets.ENV_FILE }}"
+      - run: echo "${{ secrets.TEST_SECRET }}"
