@@ -21,4 +21,8 @@ jobs:
       name: test
 
     steps:
-      - run: echo "${{ secrets.TEST_SECRET }}"
+      - run: echo "${{ vars.TEST_SECRET }}"
+
+      - name: Create .env
+        run: |
+         printf "%s" "${{ vars.ENV_FILE }}" > .env
