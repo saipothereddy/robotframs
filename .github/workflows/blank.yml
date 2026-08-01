@@ -17,16 +17,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-
     environment:
       name: test
 
     steps:
-      - name: Check Secret
-        run: |
-          if [ -z "${{ secrets.ENV_FILE }}" ]; then
-            echo "❌ Secret is EMPTY"
-            exit 1
-          else
-            echo "✅ Secret exists"
-          fi
+      - run: echo "${{ secrets.ENV_FILE }}"
